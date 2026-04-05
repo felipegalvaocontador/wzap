@@ -1,0 +1,386 @@
+package handler
+
+import (
+	"github.com/gofiber/fiber/v2"
+	"wzap/internal/dto"
+	"wzap/internal/logger"
+	"wzap/internal/service"
+)
+
+type ContactHandler struct {
+	contactSvc *service.ContactService
+}
+
+func NewContactHandler(contactSvc *service.ContactService) *ContactHandler {
+	return &ContactHandler{contactSvc: contactSvc}
+}
+
+// List godoc
+// @Summary     List contacts
+// @Description Returns all contacts from the WhatsApp session
+// @Tags        Contacts
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Success     200 {object} dto.APIResponse
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts [get]
+func (h *ContactHandler) List(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	filter := c.Query("filter", "saved")
+	contacts, err := h.contactSvc.List(c.Context(), id, filter)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to list contacts")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("List Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(contacts))
+}
+
+// Check godoc
+// @Summary     Check contacts on WhatsApp
+// @Description Checks if phone numbers are registered on WhatsApp
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.CheckContactReq true "Phone numbers"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/check [post]
+func (h *ContactHandler) Check(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.CheckContactReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+
+	results, err := h.contactSvc.CheckContacts(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to check contacts")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Check Error", "internal server error"))
+	}
+
+	return c.JSON(dto.SuccessResp(results))
+}
+
+// GetAvatar godoc
+// @Summary     Get contact avatar
+// @Description Fetches the profile picture URL and picture ID for the given WhatsApp JID
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.GetAvatarReq true "JID payload"
+// @Success     200 {object} dto.APIResponse{Data=dto.GetAvatarResp}
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/avatar [post]
+func (h *ContactHandler) GetAvatar(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.GetAvatarReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.GetAvatar(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to get avatar")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// Block godoc
+// @Summary     Block a contact
+// @Description Blocks a WhatsApp contact by JID, preventing them from sending messages
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.BlockContactReq true "JID payload"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/block [post]
+func (h *ContactHandler) Block(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.BlockContactReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.Block(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to block contact")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// Unblock godoc
+// @Summary     Unblock a contact
+// @Description Unblocks a previously blocked WhatsApp contact by JID
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.BlockContactReq true "JID payload"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/unblock [post]
+func (h *ContactHandler) Unblock(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.BlockContactReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.Unblock(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to unblock contact")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// GetBlocklist godoc
+// @Summary     Get blocked contacts list
+// @Description Returns the full list of JIDs currently blocked by the session
+// @Tags        Contacts
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Success     200 {object} dto.APIResponse
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/blocklist [get]
+func (h *ContactHandler) GetBlocklist(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.GetBlocklist(c.Context(), id)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to get blocklist")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// GetUserInfo godoc
+// @Summary     Get user info for JIDs
+// @Description Fetches detailed user info (status, profile picture, devices) for one or more WhatsApp JIDs
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.GetUserInfoReq true "JIDs payload"
+// @Success     200 {object} dto.APIResponse{Data=[]dto.UserInfoResp}
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/info [post]
+func (h *ContactHandler) GetUserInfo(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.GetUserInfoReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.GetUserInfo(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to get user info")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// GetPrivacySettings godoc
+// @Summary     Get privacy settings
+// @Description Retrieves the current session's WhatsApp privacy settings (last-seen, profile photo, status visibility)
+// @Tags        Contacts
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Success     200 {object} dto.APIResponse
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/privacy [get]
+func (h *ContactHandler) GetPrivacySettings(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.GetPrivacySettings(c.Context(), id)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to get privacy settings")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// SetProfilePicture godoc
+// @Summary     Set profile picture
+// @Description Updates the session account's WhatsApp profile picture with a base64-encoded image
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.SetProfilePictureReq true "Base64 image payload"
+// @Success     200 {object} dto.APIResponse{Data=dto.PictureIDResp}
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/profile-picture [post]
+func (h *ContactHandler) SetProfilePicture(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.SetProfilePictureReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.SetProfilePicture(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to set profile picture")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Internal Server Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(dto.PictureIDResp{PictureID: resp}))
+}
+
+// SubscribePresence godoc
+// @Summary     Subscribe to presence
+// @Description Subscribes to presence updates for a contact (online/offline/typing)
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.SubscribePresenceReq true "JID payload"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/presence [post]
+func (h *ContactHandler) SubscribePresence(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.SubscribePresenceReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	if err := h.contactSvc.SubscribePresence(c.Context(), id, req); err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to subscribe presence")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Presence Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(nil))
+}
+
+// SetPrivacy godoc
+// @Summary     Set privacy setting
+// @Description Updates a privacy setting (groupadd, last, status, profile, readreceipts, online, calladd)
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.SetPrivacyReq true "Privacy setting"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/privacy [post]
+func (h *ContactHandler) SetPrivacy(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.SetPrivacyReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	resp, err := h.contactSvc.SetPrivacy(c.Context(), id, req)
+	if err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to set privacy")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Privacy Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(resp))
+}
+
+// SetStatusMessage godoc
+// @Summary     Set status message
+// @Description Updates the session's WhatsApp "About" status message
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.SetStatusMessageReq true "Status message"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/contacts/status [post]
+func (h *ContactHandler) SetStatusMessage(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.SetStatusMessageReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	if err := h.contactSvc.SetStatusMessage(c.Context(), id, req); err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to set status message")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Status Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(nil))
+}
+
+// UpdateProfileName godoc
+// @Summary     Update profile name
+// @Description Updates the session's WhatsApp profile display name (push name)
+// @Tags        Contacts
+// @Accept      json
+// @Produce     json
+// @Param       sessionId path string true "Session name or ID"
+// @Param       body body dto.UpdateProfileNameReq true "Profile name"
+// @Success     200 {object} dto.APIResponse
+// @Failure     400 {object} dto.APIError
+// @Failure     500 {object} dto.APIError
+// @Security    Authorization
+// @Router      /sessions/{sessionId}/profile/name [post]
+func (h *ContactHandler) UpdateProfileName(c *fiber.Ctx) error {
+	id, err := getSessionID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.UpdateProfileNameReq
+	if err := parseAndValidate(c, &req); err != nil {
+		return err
+	}
+
+	if err := h.contactSvc.UpdateProfileName(c.Context(), id, req.Name); err != nil {
+		logger.Warn().Err(err).Str("sessionID", id).Msg("failed to update profile name")
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Profile Name Error", "internal server error"))
+	}
+	return c.JSON(dto.SuccessResp(nil))
+}

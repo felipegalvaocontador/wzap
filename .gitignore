@@ -1,0 +1,86 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Build artifacts
+bin/
+dist/
+/wzap
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Whatsmeow sessions (contains sensitive data)
+sessions/
+*.session
+!web/app/pages/sessions/
+!web/app/components/sessions/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+
+# Temporary files
+tmp/
+*.tmp
+
+# Docker volumes
+postgres_data/
+minio_data/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+ssl/
+
+# Kilo config (local)
+.kilo/
+.kilocode/
+.kilocode/
+
+# Agents MCP config (may contain credentials)
+.agents/mcp.json
+
+# Coverage
+coverage.out
+*.coverprofile
+
+# OpenCode
+.opencode/
+
+# Factory
+.factory/
+
+# Windsurf
+.windsurf/
+
+# Agent
+.agent/
+
+# Temp
+temp/
