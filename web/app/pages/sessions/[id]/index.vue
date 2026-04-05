@@ -7,7 +7,7 @@ const { current: session, profile, refreshCurrent, refreshSessions } = useSessio
 const toast = useToast()
 
 const sessionId = computed(() => route.params.id as string)
-const loading = ref(true)
+const loading = ref(false)
 const qrModal = useTemplateRef('qrModal')
 const pairModal = useTemplateRef('pairModal')
 
@@ -133,7 +133,8 @@ const navbarActions = computed<DropdownMenuItem[][]>(() => [
   }]
 ])
 
-watch(sessionId, fetchSession, { immediate: true })
+onMounted(() => fetchSession())
+watch(sessionId, fetchSession)
 </script>
 
 <template>

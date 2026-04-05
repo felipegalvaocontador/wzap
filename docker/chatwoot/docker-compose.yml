@@ -3,6 +3,7 @@ x-base: &base
   env_file: .env
   volumes:
     - storage_data:/app/storage
+    - ./trigger.rb:/app/lib/webhooks/trigger.rb:ro
   restart: unless-stopped
 
 services:

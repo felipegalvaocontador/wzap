@@ -22,7 +22,7 @@ interface Group {
 }
 
 const groups = ref<Group[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('all')
 const viewMode = ref<'grid' | 'list'>('list')
@@ -224,7 +224,8 @@ function getGroupActions(g: Group): DropdownMenuItem[][] {
   ]
 }
 
-watch(sessionId, fetchGroups, { immediate: true })
+onMounted(() => fetchGroups())
+watch(sessionId, fetchGroups)
 </script>
 
 <template>

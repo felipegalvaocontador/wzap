@@ -1,6 +1,7 @@
 package chatwoot
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -71,21 +72,72 @@ func parseDeletePayload(payload []byte) (*waDeletePayload, error) {
 	return &data, nil
 }
 
-func extractMediaURL(msg map[string]interface{}) string {
+type mediaInfo struct {
+	DirectPath    string
+	MediaKey      []byte
+	FileSHA256    []byte
+	FileEncSHA256 []byte
+	FileLength    int
+	MimeType      string
+	MediaType     string
+	FileName      string
+}
+
+func extractMediaInfo(msg map[string]interface{}) *mediaInfo {
 	if msg == nil {
-		return ""
+		return nil
 	}
 
-	mediaURLIf, ok := msg["url"]
-	if !ok {
-		return ""
+	mediaTypes := map[string]string{
+		"imageMessage":    "image",
+		"videoMessage":    "video",
+		"audioMessage":    "audio",
+		"documentMessage": "document",
+		"stickerMessage":  "sticker",
 	}
 
-	mediaURL, ok := mediaURLIf.(string)
-	if !ok {
-		return ""
+	for key, mt := range mediaTypes {
+		sub := getMapField(msg, key)
+		if sub == nil {
+			continue
+		}
+
+		directPath := getStringField(sub, "directPath")
+		if directPath == "" {
+			continue
+		}
+
+		mediaKeyB64 := getStringField(sub, "mediaKey")
+		fileSHA256B64 := getStringField(sub, "fileSHA256")
+		fileEncSHA256B64 := getStringField(sub, "fileEncSHA256")
+
+		mediaKey, _ := base64.StdEncoding.DecodeString(mediaKeyB64)
+		fileSHA256, _ := base64.StdEncoding.DecodeString(fileSHA256B64)
+		fileEncSHA256, _ := base64.StdEncoding.DecodeString(fileEncSHA256B64)
+
+		mimeType := getStringField(sub, "mimetype")
+		fileLength := int(getFloatField(sub, "fileLength"))
+		fileName := getStringField(sub, "fileName")
+
+		return &mediaInfo{
+			DirectPath:    directPath,
+			MediaKey:      mediaKey,
+			FileSHA256:    fileSHA256,
+			FileEncSHA256: fileEncSHA256,
+			FileLength:    fileLength,
+			MimeType:      mimeType,
+			MediaType:     mt,
+			FileName:      fileName,
+		}
 	}
-	return mediaURL
+
+	if dwc := getMapField(msg, "documentWithCaptionMessage"); dwc != nil {
+		if innerMsg := getMapField(dwc, "message"); innerMsg != nil {
+			return extractMediaInfo(innerMsg)
+		}
+	}
+
+	return nil
 }
 
 func extractTextFromMessage(msg map[string]interface{}) string {
@@ -118,6 +170,18 @@ func extractTextFromMessage(msg map[string]interface{}) string {
 			return caption
 		}
 		return filename
+	}
+
+	if dwc := getMapField(msg, "documentWithCaptionMessage"); dwc != nil {
+		if innerMsg := getMapField(dwc, "message"); innerMsg != nil {
+			if docMsg := getMapField(innerMsg, "documentMessage"); docMsg != nil {
+				caption := getStringField(docMsg, "caption")
+				if caption != "" {
+					return caption
+				}
+				return getStringField(docMsg, "fileName")
+			}
+		}
 	}
 
 	if locMsg := getMapField(msg, "locationMessage"); locMsg != nil {
@@ -172,11 +236,32 @@ func extractStanzaID(msg map[string]interface{}) string {
 		return ""
 	}
 
-	extText := getMapField(msg, "extendedTextMessage")
-	if extText != nil {
-		contextInfo := getMapField(extText, "contextInfo")
-		if contextInfo != nil {
-			return getStringField(contextInfo, "stanzaId")
+	if ci := getMapField(msg, "contextInfo"); ci != nil {
+		if id := getStringField(ci, "stanzaId"); id != "" {
+			return id
+		}
+	}
+
+	msgTypes := []string{
+		"extendedTextMessage",
+		"imageMessage",
+		"videoMessage",
+		"audioMessage",
+		"documentMessage",
+		"stickerMessage",
+	}
+
+	for _, key := range msgTypes {
+		sub := getMapField(msg, key)
+		if sub == nil {
+			continue
+		}
+		ci := getMapField(sub, "contextInfo")
+		if ci == nil {
+			continue
+		}
+		if id := getStringField(ci, "stanzaId"); id != "" {
+			return id
 		}
 	}
 

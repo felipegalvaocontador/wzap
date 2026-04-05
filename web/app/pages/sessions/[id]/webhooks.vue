@@ -15,7 +15,7 @@ const table = useTemplateRef('table')
 
 const sessionId = computed(() => route.params.id as string)
 const webhooks = ref<Webhook[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const rowSelection = ref({})
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
 
@@ -128,7 +128,8 @@ const columns: TableColumn<Webhook>[] = [
   }
 ]
 
-watch(sessionId, fetchWebhooks, { immediate: true })
+onMounted(() => fetchWebhooks())
+watch(sessionId, fetchWebhooks)
 </script>
 
 <template>

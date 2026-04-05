@@ -2,18 +2,16 @@
 import * as z from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 
-const { api, apiBase, setApiBase, token, setToken } = useWzap()
+const { api, apiBase, token, setToken } = useWzap()
 const toast = useToast()
 
 const schema = z.object({
-  apiBase: z.string().url('Must be a valid URL'),
   token: z.string().min(1, 'Token is required')
 })
 
 type Schema = z.output<typeof schema>
 
 const state = reactive<Schema>({
-  apiBase: apiBase.value,
   token: token.value
 })
 
@@ -21,7 +19,6 @@ const testing = ref(false)
 const healthResult = ref<{ status: string, services: Record<string, boolean> } | null>(null)
 
 async function onSubmit(event: FormSubmitEvent<Schema>) {
-  setApiBase(event.data.apiBase)
   setToken(event.data.token)
   toast.add({ title: 'Settings saved', color: 'success' })
 }
@@ -30,7 +27,6 @@ async function testConnection() {
   testing.value = true
   healthResult.value = null
   try {
-    setApiBase(state.apiBase)
     setToken(state.token)
     const res: any = await api('/health')
     healthResult.value = res.data
@@ -50,7 +46,7 @@ async function testConnection() {
   >
     <UPageCard
       title="API Connection"
-      description="Configure the wzap API endpoint and authentication token."
+      description="Configure the wzap API authentication token."
       variant="naked"
       orientation="horizontal"
       class="mb-4"
@@ -66,13 +62,11 @@ async function testConnection() {
 
     <UPageCard variant="subtle">
       <UFormField
-        name="apiBase"
         label="API Base URL"
-        description="The base URL of your wzap instance, e.g. http://localhost:8080"
-        required
+        description="Configured via NUXT_PUBLIC_API_URL environment variable."
         class="flex max-sm:flex-col justify-between items-start gap-4"
       >
-        <UInput v-model="state.apiBase" placeholder="http://localhost:8080" class="w-full max-w-xs" />
+        <UInput :model-value="apiBase" disabled class="w-full max-w-xs" />
       </UFormField>
 
       <USeparator />

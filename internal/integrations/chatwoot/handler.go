@@ -1,11 +1,14 @@
 package chatwoot
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -214,14 +217,18 @@ func (h *Handler) IncomingWebhook(c *fiber.Ctx) error {
 	}
 
 	var body dto.ChatwootWebhookPayload
-	if err := c.BodyParser(&body); err != nil {
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		logger.Warn().Err(err).Str("session", sessionID).Str("rawBody", string(c.Body()[:min(len(c.Body()), 500)])).Msg("[CW] failed to parse webhook payload")
 		return c.Status(fiber.StatusBadRequest).JSON(dto.ErrorResp("Invalid Request", "Failed to parse webhook payload"))
 	}
 
-	if err := h.service.HandleIncomingWebhook(c.Context(), sessionID, body); err != nil {
-		logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to handle Chatwoot webhook")
-		return c.Status(fiber.StatusInternalServerError).JSON(dto.ErrorResp("Webhook Error", "Failed to process webhook"))
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.service.HandleIncomingWebhook(ctx, sessionID, body); err != nil {
+			logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to handle Chatwoot webhook")
+		}
+	}()
 
 	return c.Status(fiber.StatusOK).JSON(dto.SuccessResp(nil))
 }

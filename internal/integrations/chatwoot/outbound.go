@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	"wzap/internal/dto"
@@ -20,17 +21,28 @@ func (s *Service) HandleIncomingWebhook(ctx context.Context, sessionID string, b
 		return nil
 	}
 
-	if body.Message != nil && body.Message.MessageType == 1 {
+	if body.Private {
+		return nil
+	}
+
+	msg := body.GetMessage()
+
+	if msg != nil && msg.IsOutgoing() {
 		return s.handleOutgoingMessage(ctx, cfg, body)
 	}
 
-	if body.EventType == "message_updated" && body.Message != nil {
-		if deleted, _ := body.Message.ContentAttributes["deleted"].(bool); deleted {
+	eventType := body.EventType
+	if eventType == "" {
+		eventType = body.Event
+	}
+
+	if eventType == "message_updated" && msg != nil {
+		if deleted, _ := msg.ContentAttributes["deleted"].(bool); deleted {
 			return s.handleMessageUpdated(ctx, cfg, body)
 		}
 	}
 
-	if body.EventType == "conversation_status_changed" && body.Conversation != nil {
+	if eventType == "conversation_status_changed" && body.Conversation != nil {
 		return s.handleConversationStatusChanged(ctx, cfg, body)
 	}
 
@@ -38,23 +50,34 @@ func (s *Service) HandleIncomingWebhook(ctx context.Context, sessionID string, b
 }
 
 func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig, body dto.ChatwootWebhookPayload) error {
-	if body.Message == nil || body.Conversation == nil {
+	msg := body.GetMessage()
+	if msg == nil || body.Conversation == nil {
 		return nil
 	}
 
-	sourceID := body.Message.SourceID
-	if strings.HasPrefix(sourceID, "WAID:") {
+	if strings.HasPrefix(msg.SourceID, "WAID:") {
 		return nil
 	}
 
-	chatJID := body.Conversation.ContactInbox.SourceID
+	conv := body.Conversation
+	chatJID := conv.ContactInbox.SourceID
+	if chatJID == "" && conv.Meta.Sender.Identifier != "" {
+		chatJID = conv.Meta.Sender.Identifier
+	}
+	if chatJID == "" && conv.Meta.Sender.PhoneNumber != "" {
+		phone := strings.TrimPrefix(conv.Meta.Sender.PhoneNumber, "+")
+		chatJID = phone + "@s.whatsapp.net"
+	}
 	if chatJID == "" {
+		logger.Warn().Int("convID", conv.ID).Msg("[CW] no chat JID found for outgoing message")
 		return nil
 	}
+
+	logger.Debug().Str("chatJID", chatJID).Str("content", msg.Content).Msg("[CW] sending outgoing message to WhatsApp")
 
 	var replyTo *dto.ReplyContext
-	if body.Message.ContentAttributes != nil {
-		if inReplyTo, ok := body.Message.ContentAttributes["in_reply_to"].(float64); ok && inReplyTo > 0 {
+	if msg.ContentAttributes != nil {
+		if inReplyTo, ok := msg.ContentAttributes["in_reply_to"].(float64); ok && inReplyTo > 0 {
 			origMsg, err := s.msgRepo.FindByCWMessageID(ctx, cfg.SessionID, int(inReplyTo))
 			if err == nil {
 				replyTo = &dto.ReplyContext{MessageID: origMsg.ID}
@@ -62,16 +85,21 @@ func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig
 		}
 	}
 
-	if len(body.Message.Attachments) > 0 {
-		for _, att := range body.Message.Attachments {
-			if err := s.sendAttachmentToWhatsApp(ctx, cfg, chatJID, att.URL, body.Message.Content, att.FileType, replyTo); err != nil {
+	if len(msg.Attachments) > 0 {
+		for _, att := range msg.Attachments {
+			attURL := att.DataURL
+			if attURL == "" {
+				attURL = att.URL
+			}
+			attURL = rewriteAttachmentURL(attURL, cfg.URL)
+			if err := s.sendAttachmentToWhatsApp(ctx, cfg, chatJID, attURL, msg.Content, att.FileType, replyTo); err != nil {
 				logger.Warn().Err(err).Msg("Failed to send attachment from Chatwoot to WhatsApp")
 			}
 		}
 		return nil
 	}
 
-	content := body.Message.Content
+	content := msg.Content
 	content = convertCWToWAMarkdown(content)
 
 	_, err := s.messageSvc.SendText(ctx, cfg.SessionID, dto.SendTextReq{
@@ -83,19 +111,20 @@ func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig
 }
 
 func (s *Service) handleMessageUpdated(ctx context.Context, cfg *ChatwootConfig, body dto.ChatwootWebhookPayload) error {
-	if body.Message == nil {
+	webhookMsg := body.GetMessage()
+	if webhookMsg == nil {
 		return nil
 	}
 
-	cwMsgID := body.Message.ID
-	msg, err := s.msgRepo.FindByCWMessageID(ctx, cfg.SessionID, cwMsgID)
+	cwMsgID := webhookMsg.ID
+	storedMsg, err := s.msgRepo.FindByCWMessageID(ctx, cfg.SessionID, cwMsgID)
 	if err != nil {
 		return nil
 	}
 
 	_, _ = s.messageSvc.DeleteMessage(ctx, cfg.SessionID, dto.DeleteMessageReq{
-		Phone:     msg.ChatJID,
-		MessageID: msg.ID,
+		Phone:     storedMsg.ChatJID,
+		MessageID: storedMsg.ID,
 	})
 
 	if body.Conversation != nil && body.Conversation.Status == "resolved" && !cfg.ReopenConversation {
@@ -122,7 +151,46 @@ func (s *Service) handleConversationStatusChanged(ctx context.Context, cfg *Chat
 	return nil
 }
 
-func (s *Service) sendAttachmentToWhatsApp(ctx context.Context, cfg *ChatwootConfig, chatJID, attachmentURL, caption, mimeType string, replyTo *dto.ReplyContext) error {
+func rewriteAttachmentURL(attURL, chatwootBaseURL string) string {
+	if attURL == "" || chatwootBaseURL == "" {
+		return attURL
+	}
+
+	parsed, err := url.Parse(attURL)
+	if err != nil {
+		return attURL
+	}
+
+	base, err := url.Parse(strings.TrimRight(chatwootBaseURL, "/"))
+	if err != nil {
+		return attURL
+	}
+
+	parsed.Scheme = base.Scheme
+	parsed.Host = base.Host
+	return parsed.String()
+}
+
+func filenameFromURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	segments := strings.Split(parsed.Path, "/")
+	for i := len(segments) - 1; i >= 0; i-- {
+		seg := segments[i]
+		if seg != "" && strings.Contains(seg, ".") {
+			decoded, err := url.PathUnescape(seg)
+			if err != nil {
+				return seg
+			}
+			return decoded
+		}
+	}
+	return ""
+}
+
+func (s *Service) sendAttachmentToWhatsApp(ctx context.Context, cfg *ChatwootConfig, chatJID, attachmentURL, caption, fileType string, replyTo *dto.ReplyContext) error {
 	resp, err := s.httpClient.Get(attachmentURL)
 	if err != nil {
 		return fmt.Errorf("download attachment: %w", err)
@@ -137,11 +205,19 @@ func (s *Service) sendAttachmentToWhatsApp(ctx context.Context, cfg *ChatwootCon
 		return fmt.Errorf("read attachment: %w", err)
 	}
 
-	msgType := strings.Split(mimeType, "/")[0]
+	filename := filenameFromURL(attachmentURL)
+	mimeType, _ := GetMIMETypeAndExt(filename, data)
+
+	msgType := fileType
+	if strings.Contains(mimeType, "/") {
+		msgType = strings.Split(mimeType, "/")[0]
+	}
+
 	mediaReq := dto.SendMediaReq{
 		Phone:    chatJID,
 		Caption:  caption,
 		MimeType: mimeType,
+		FileName: filename,
 		Base64:   base64.StdEncoding.EncodeToString(data),
 		ReplyTo:  replyTo,
 	}

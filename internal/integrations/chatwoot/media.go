@@ -68,6 +68,33 @@ func GetMIMETypeAndExt(url string, data []byte) (mimeType, ext string) {
 	return
 }
 
+func mimeTypeToExt(mimeType string) string {
+	base := strings.Split(mimeType, ";")[0]
+	base = strings.TrimSpace(base)
+	switch base {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "video/mp4":
+		return ".mp4"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav":
+		return ".wav"
+	case "application/pdf":
+		return ".pdf"
+	default:
+		return ""
+	}
+}
+
 func httpGetWithContext(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

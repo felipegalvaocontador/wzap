@@ -66,6 +66,7 @@ func (s *Server) SetupRoutes() error {
 	chatwootRepo := chatwoot.NewRepository(s.db.Pool)
 	chatwootSvc := chatwoot.NewService(chatwootRepo, messageRepo, messageSvc)
 	chatwootSvc.SetJIDResolver(engine)
+	chatwootSvc.SetMediaDownloader(engine)
 	chatwootSvc.SetServerURL(s.Config.ServerURL)
 	chatwootHandler := chatwoot.NewHandler(chatwootSvc, chatwootRepo)
 	disp.AddListener(chatwootSvc)
@@ -105,6 +106,13 @@ func (s *Server) SetupRoutes() error {
 	s.App.Use("/ws", wsHandler.Upgrade())
 	s.App.Get("/ws/:sessionId", ws.New(wsHandler.Handle()))
 	s.App.Get("/ws", ws.New(wsHandler.Handle()))
+
+	// Chatwoot Webhook (No Auth - validated via HMAC signature)
+	s.App.Post("/chatwoot/webhook/:sessionId", chatwootHandler.IncomingWebhook)
+
+	// Cloud API Webhooks (No Auth - validated via HMAC signature)
+	s.App.Post("/webhooks/cloud/:sessionId", cloudWebhookHandler.Handle)
+	s.App.Get("/webhooks/cloud/:sessionId", cloudWebhookHandler.Verify)
 
 	// API Group with Auth (admin token or session token)
 	grp := s.App.Group("/", middleware.Auth(s.Config, sessionRepo))
@@ -234,15 +242,10 @@ func (s *Server) SetupRoutes() error {
 	sess.Put("/webhooks/:wid", webhookHandler.Update)
 	sess.Delete("/webhooks/:wid", webhookHandler.Delete)
 
-	// 11. Cloud API Webhooks (No Auth - validated via HMAC signature)
-	s.App.Post("/webhooks/cloud/:sessionId", cloudWebhookHandler.Handle)
-	s.App.Get("/webhooks/cloud/:sessionId", cloudWebhookHandler.Verify)
-
 	// 12. Chatwoot Integration
 	sess.Put("/integrations/chatwoot", chatwootHandler.Configure)
 	sess.Get("/integrations/chatwoot", chatwootHandler.GetConfig)
 	sess.Delete("/integrations/chatwoot", chatwootHandler.DeleteConfig)
-	s.App.Post("/chatwoot/webhook/:sessionId", chatwootHandler.IncomingWebhook)
 
 	return nil
 }

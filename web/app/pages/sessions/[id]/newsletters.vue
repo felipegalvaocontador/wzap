@@ -6,7 +6,7 @@ const sessionId = computed(() => route.params.id as string)
 const { listNewsletters, subscribe, unsubscribe, muteNewsletter, getInviteLink } = useNewsletter(sessionId)
 
 const newsletters = ref<any[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const filter = ref('')
 
 async function fetchNewsletters() {
@@ -81,7 +81,8 @@ function dropdownItems(n: any) {
 
 const createModal = useTemplateRef('createModal')
 
-watch(sessionId, fetchNewsletters, { immediate: true })
+onMounted(() => fetchNewsletters())
+watch(sessionId, fetchNewsletters)
 </script>
 
 <template>

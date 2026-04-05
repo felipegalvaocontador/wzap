@@ -15,7 +15,7 @@ const table = useTemplateRef('table')
 const sessions = ref<Session[]>([])
 const selectedSessionId = ref('')
 const webhooks = ref<Webhook[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const rowSelection = ref({})
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
 

@@ -9,7 +9,7 @@ const toast = useToast()
 
 const sessionId = computed(() => route.params.id as string)
 
-const loading = ref(true)
+const loading = ref(false)
 const saving = ref(false)
 const sessionName = ref('')
 const sessionEngine = ref('')
@@ -80,7 +80,9 @@ async function fetchSession() {
     state.proxyUsername = s.proxy?.username ?? ''
     state.proxyPassword = s.proxy?.password ?? ''
   } catch {
-    toast.add({ title: 'Failed to load session', color: 'error' })
+    toast.add({ title: 'Session not found', color: 'error' })
+    navigateTo('/')
+    return
   }
   loading.value = false
 }
@@ -185,7 +187,8 @@ async function saveProfilePicture() {
   savingPicture.value = false
 }
 
-watch(sessionId, fetchSession, { immediate: true })
+onMounted(() => fetchSession())
+watch(sessionId, fetchSession)
 </script>
 
 <template>
@@ -456,9 +459,6 @@ watch(sessionId, fetchSession, { immediate: true })
         </template>
       </UForm>
 
-      <!-- Chatwoot Integration -->
-      <SessionsChatwootConfigCard :session-id="sessionId" :chatwoot-enabled="false" @updated="fetchSession" />
-
       <!-- Profile -->
       <UPageCard
         title="Profile"
@@ -524,6 +524,8 @@ watch(sessionId, fetchSession, { immediate: true })
           </div>
         </UFormField>
       </UPageCard>
+
+      <SessionsChatwootConfigCard :session-id="sessionId" :chatwoot-enabled="false" @updated="fetchSession" />
 
       <SessionsPrivacyCard :session-id="sessionId" />
     </template>

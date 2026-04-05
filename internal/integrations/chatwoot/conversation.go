@@ -3,49 +3,11 @@ package chatwoot
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 
 	"wzap/internal/logger"
 )
-
-func (s *Service) handleMediaMessage(ctx context.Context, cfg *ChatwootConfig, convID int, msgID, mediaURL string, msg map[string]interface{}) {
-	if mediaURL == "" {
-		return
-	}
-
-	resp, err := s.httpClient.Get(mediaURL)
-	if err != nil {
-		logger.Warn().Err(err).Str("url", mediaURL).Msg("Failed to download media for Chatwoot")
-		return
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Warn().Err(err).Str("url", mediaURL).Msg("Failed to read media body")
-		return
-	}
-
-	mimeType, ext := GetMIMETypeAndExt(mediaURL, data)
-	filename := "file" + ext
-
-	caption := extractTextFromMessage(msg)
-	client := s.clientFn(cfg)
-	cwMsg, err := client.CreateMessageWithAttachment(ctx, convID, caption, filename, data, mimeType)
-	if err != nil {
-		logger.Warn().Err(err).Msg("Failed to upload media to Chatwoot")
-		return
-	}
-
-	if msgID != "" {
-		_ = s.msgRepo.UpdateChatwootRef(ctx, cfg.SessionID, msgID, cwMsg.ID, convID, cwMsg.SourceID)
-	}
-}
 
 func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootConfig, chatJID, pushName string) (int, error) {
 	cacheKey := cfg.SessionID + "+" + chatJID
@@ -81,6 +43,7 @@ func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootCon
 		contact, err := client.CreateContact(ctx, CreateContactReq{
 			InboxID:     cfg.InboxID,
 			Name:        name,
+			Identifier:  chatJID,
 			PhoneNumber: "+" + phone,
 		})
 		if err != nil {
@@ -104,9 +67,14 @@ func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootCon
 	for _, conv := range conversations {
 		if conv.InboxID == cfg.InboxID {
 			if conv.Status == "resolved" && cfg.ReopenConversation {
-				if err := client.UpdateConversationStatus(ctx, conv.ID, "open"); err != nil {
+				reopenStatus := "open"
+				if cfg.ConversationPending {
+					reopenStatus = "pending"
+				}
+				if err := client.UpdateConversationStatus(ctx, conv.ID, reopenStatus); err != nil {
 					logger.Warn().Err(err).Int("convID", conv.ID).Msg("Failed to reopen conversation")
 				}
+				return conv.ID, nil
 			}
 			if conv.Status != "resolved" {
 				return conv.ID, nil
@@ -114,11 +82,16 @@ func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootCon
 		}
 	}
 
-	conv, err := client.CreateConversation(ctx, CreateConversationReq{
+	req := CreateConversationReq{
 		InboxID:   cfg.InboxID,
 		SourceID:  chatJID,
 		ContactID: contactID,
-	})
+	}
+	if cfg.ConversationPending {
+		req.Status = "pending"
+	}
+
+	conv, err := client.CreateConversation(ctx, req)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create conversation: %w", err)
 	}
@@ -137,9 +110,9 @@ func (s *Service) findOrCreateBotConversation(ctx context.Context, cfg *Chatwoot
 	var contactID int
 	if len(contacts) == 0 {
 		contact, err := client.CreateContact(ctx, CreateContactReq{
-			InboxID:     cfg.InboxID,
-			Name:        cfg.SessionID,
-			PhoneNumber: cfg.SessionID,
+			InboxID:    cfg.InboxID,
+			Name:       cfg.SessionID,
+			Identifier: cfg.SessionID,
 		})
 		if err != nil {
 			return 0, fmt.Errorf("failed to create bot contact: %w", err)

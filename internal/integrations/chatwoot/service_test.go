@@ -344,7 +344,7 @@ func (m *mockCWClient) CreateMessage(ctx context.Context, convID int, req Messag
 	return &Message{ID: 1, SourceID: "src-1"}, nil
 }
 
-func (m *mockCWClient) CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string) (*Message, error) {
+func (m *mockCWClient) CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error) {
 	return &Message{ID: 1}, nil
 }
 

@@ -25,7 +25,7 @@ interface Message {
 }
 
 const messages = ref<Message[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const pagination = ref({ pageIndex: 0, pageSize: 50 })
 const table = useTemplateRef('table')
 
@@ -91,7 +91,8 @@ async function wrapAction(fn: () => Promise<void>) {
   }
 }
 
-watch(sessionId, fetchMessages, { immediate: true })
+onMounted(() => fetchMessages())
+watch(sessionId, fetchMessages)
 </script>
 
 <template>

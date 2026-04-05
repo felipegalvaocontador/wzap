@@ -7,7 +7,7 @@ const { api } = useWzap()
 
 const sessions = ref<Session[]>([])
 const health = ref<{ status: string, services: Record<string, boolean> } | null>(null)
-const loading = ref(true)
+const loading = ref(false)
 
 async function fetchData() {
   loading.value = true

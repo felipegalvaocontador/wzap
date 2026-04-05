@@ -25,7 +25,7 @@ interface Contact {
 
 const contacts = ref<Contact[]>([])
 const blockedList = ref<string[]>([])
-const loading = ref(true)
+const loading = ref(false)
 const loadingBlocked = ref(false)
 const search = ref('')
 const contactFilter = ref('saved')
@@ -215,7 +215,8 @@ const columns = computed<TableColumn<Contact>[]>(() => [{
   }
 }])
 
-watch(sessionId, fetchContacts, { immediate: true })
+onMounted(() => fetchContacts())
+watch(sessionId, fetchContacts)
 </script>
 
 <template>

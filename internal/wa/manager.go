@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.mau.fi/whatsmeow"
@@ -114,4 +115,27 @@ func (m *Manager) getSessionName(sessionID string) string {
 		}
 	}
 	return ""
+}
+
+func (m *Manager) DownloadMediaByPath(ctx context.Context, sessionID, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength int, mediaType string) ([]byte, error) {
+	client, err := m.GetClient(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	var wmMediaType whatsmeow.MediaType
+	switch mediaType {
+	case "image", "sticker":
+		wmMediaType = whatsmeow.MediaImage
+	case "audio":
+		wmMediaType = whatsmeow.MediaAudio
+	case "video":
+		wmMediaType = whatsmeow.MediaVideo
+	case "document":
+		wmMediaType = whatsmeow.MediaDocument
+	default:
+		return nil, fmt.Errorf("unknown media type: %s", mediaType)
+	}
+
+	return client.DownloadMediaWithPath(ctx, directPath, encFileHash, fileHash, mediaKey, fileLength, wmMediaType, "")
 }

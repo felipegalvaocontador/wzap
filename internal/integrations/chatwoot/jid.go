@@ -6,6 +6,10 @@ import (
 )
 
 func shouldIgnoreJID(chatJID string, ignoreGroups bool, ignoreJIDs []string) bool {
+	if chatJID == "status@broadcast" {
+		return true
+	}
+
 	if ignoreGroups && strings.HasSuffix(chatJID, "@g.us") {
 		return true
 	}

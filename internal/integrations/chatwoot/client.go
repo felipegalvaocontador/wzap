@@ -21,7 +21,7 @@ type CWClient interface {
 	CreateConversation(ctx context.Context, req CreateConversationReq) (*Conversation, error)
 	UpdateConversationStatus(ctx context.Context, convID int, status string) error
 	CreateMessage(ctx context.Context, convID int, req MessageReq) (*Message, error)
-	CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string) (*Message, error)
+	CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error)
 	DeleteMessage(ctx context.Context, convID, msgID int) error
 	UpdateLastSeen(ctx context.Context, inboxIdentifier, sourceID string, convID int) error
 	ListInboxes(ctx context.Context) ([]Inbox, error)
@@ -123,6 +123,7 @@ func (c *Client) FilterContacts(ctx context.Context, phone string) ([]Contact, e
 type CreateContactReq struct {
 	InboxID              int            `json:"inbox_id"`
 	Name                 string         `json:"name,omitempty"`
+	Identifier           string         `json:"identifier,omitempty"`
 	PhoneNumber          string         `json:"phone_number,omitempty"`
 	Email                string         `json:"email,omitempty"`
 	AdditionalAttributes map[string]any `json:"additional_attributes,omitempty"`
@@ -184,6 +185,7 @@ type CreateConversationReq struct {
 	InboxID   int    `json:"inbox_id"`
 	SourceID  string `json:"source_id,omitempty"`
 	ContactID int    `json:"contact_id,omitempty"`
+	Status    string `json:"status,omitempty"`
 }
 
 func (c *Client) CreateConversation(ctx context.Context, req CreateConversationReq) (*Conversation, error) {
@@ -240,7 +242,7 @@ func (c *Client) CreateMessage(ctx context.Context, convID int, req MessageReq) 
 	return &result, nil
 }
 
-func (c *Client) CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string) (*Message, error) {
+func (c *Client) CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error) {
 	var result Message
 	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d/messages", c.accountID, convID)
 
@@ -250,7 +252,10 @@ func (c *Client) CreateMessageWithAttachment(ctx context.Context, convID int, co
 	if content != "" {
 		_ = writer.WriteField("content", content)
 	}
-	_ = writer.WriteField("message_type", "outgoing")
+	_ = writer.WriteField("message_type", messageType)
+	if sourceID != "" {
+		_ = writer.WriteField("source_id", sourceID)
+	}
 
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="attachments[]"; filename="%s"`, filename))

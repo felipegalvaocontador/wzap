@@ -1,22 +1,18 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { setToken, setApiBase, apiBase } = useWzap()
+const { setToken, api } = useWzap()
 const tokenInput = ref('')
-const apiBaseInput = ref(apiBase.value)
 const error = ref('')
 const loading = ref(false)
 
 async function handleLogin() {
   loading.value = true
   error.value = ''
-  setApiBase(apiBaseInput.value)
   setToken(tokenInput.value)
 
   try {
-    await $fetch(`${apiBaseInput.value}/sessions`, {
-      headers: { Authorization: tokenInput.value }
-    })
+    await api('/sessions')
     navigateTo('/')
   } catch {
     error.value = 'Invalid token or API unreachable'
@@ -41,10 +37,6 @@ async function handleLogin() {
 
       <UCard>
         <form class="space-y-4" @submit.prevent="handleLogin">
-          <UFormField label="API URL">
-            <UInput v-model="apiBaseInput" placeholder="http://localhost:8080" class="w-full" />
-          </UFormField>
-
           <UFormField label="Admin Token">
             <UInput
               v-model="tokenInput"
