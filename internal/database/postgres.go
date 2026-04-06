@@ -170,67 +170,41 @@ func (db *DB) BootstrapBaseline(ctx context.Context) error {
 		return fmt.Errorf("failed to get existing tables: %w", err)
 	}
 
-	baselineMigrations := []string{}
-
-	if contains(existingTables, "wz_sessions") {
-		baselineMigrations = append(baselineMigrations, "001_schema.up.sql")
-	}
-	if contains(existingTables, "wz_messages") {
-		baselineMigrations = append(baselineMigrations, "002_messages.up.sql")
-	}
-	if contains(existingTables, "wz_chatwoot") {
-		baselineMigrations = append(baselineMigrations, "003_chatwoot.up.sql")
-
-		hasIgnoreJIDs, err := db.columnExists(ctx, "wz_chatwoot", "ignore_jids")
-		if err != nil {
-			return fmt.Errorf("failed to check ignore_jids column: %w", err)
-		}
-		if hasIgnoreJIDs {
-			baselineMigrations = append(baselineMigrations, "004_chatwoot_ignore_jids.up.sql")
-		}
+	tableToMigration := []struct {
+		table     string
+		migration string
+	}{
+		{"wz_sessions", "001_schema.up.sql"},
+		{"wz_messages", "002_messages.up.sql"},
+		{"wz_chatwoot", "003_chatwoot.up.sql"},
 	}
 
-	if contains(existingTables, "wz_messages") {
-		hasCWIndexes, err := db.indexExists(ctx, "idx_wz_messages_cw_conversation")
-		if err != nil {
-			return fmt.Errorf("failed to check chatwoot indexes: %w", err)
+	for _, tm := range tableToMigration {
+		if !contains(existingTables, tm.table) {
+			continue
 		}
-		if hasCWIndexes {
-			baselineMigrations = append(baselineMigrations, "005_chatwoot_indexes.up.sql")
+		if err := db.recordMigrationIfNotExists(ctx, tm.migration); err != nil {
+			return fmt.Errorf("failed to record baseline migration %s: %w", tm.migration, err)
 		}
-	}
-
-	for _, migration := range baselineMigrations {
-		if err := db.recordMigrationIfNotExists(ctx, migration); err != nil {
-			return fmt.Errorf("failed to record baseline migration %s: %w", migration, err)
-		}
-		logger.Info().Str("file", migration).Msg("Baseline migration recorded")
+		logger.Info().Str("file", tm.migration).Msg("Baseline migration recorded")
 	}
 
 	return nil
 }
 
 func (db *DB) columnExists(ctx context.Context, table, column string) (bool, error) {
-	query := `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
-		)
-	`
 	var exists bool
-	err := db.Pool.QueryRow(ctx, query, table, column).Scan(&exists)
+	err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2)`,
+		table, column).Scan(&exists)
 	return exists, err
 }
 
 func (db *DB) indexExists(ctx context.Context, indexName string) (bool, error) {
-	query := `
-		SELECT EXISTS (
-			SELECT 1 FROM pg_indexes
-			WHERE schemaname = 'public' AND indexname = $1
-		)
-	`
 	var exists bool
-	err := db.Pool.QueryRow(ctx, query, indexName).Scan(&exists)
+	err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1)`,
+		indexName).Scan(&exists)
 	return exists, err
 }
 

@@ -23,7 +23,8 @@ type Config struct {
 	MinioBucket    string
 	MinioUseSSL    bool
 
-	NATSURL string
+	NATSURL  string
+	RedisURL string
 
 	WALogLevel       string
 	GlobalWebhookURL string
@@ -52,7 +53,8 @@ func Load() *Config {
 		MinioBucket:    getEnv("MINIO_BUCKET", "wzap-media"),
 		MinioUseSSL:    getEnvAsBool("MINIO_USE_SSL", false),
 
-		NATSURL: getEnv("NATS_URL", "nats://localhost:4222"),
+		NATSURL:  getEnv("NATS_URL", "nats://localhost:4222"),
+		RedisURL: getEnv("REDIS_URL", ""),
 
 		WALogLevel:       getEnv("WA_LOG_LEVEL", "INFO"),
 		GlobalWebhookURL: getEnv("GLOBAL_WEBHOOK_URL", ""),

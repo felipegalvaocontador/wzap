@@ -11,6 +11,8 @@ import (
 	"net/textproto"
 	"strings"
 	"time"
+
+	"wzap/internal/logger"
 )
 
 type CWClient interface {
@@ -23,6 +25,7 @@ type CWClient interface {
 	CreateMessage(ctx context.Context, convID int, req MessageReq) (*Message, error)
 	CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error)
 	DeleteMessage(ctx context.Context, convID, msgID int) error
+	UpdateMessage(ctx context.Context, convID, msgID int, content string) error
 	UpdateLastSeen(ctx context.Context, inboxIdentifier, sourceID string, convID int) error
 	ListInboxes(ctx context.Context) ([]Inbox, error)
 	CreateInbox(ctx context.Context, name, webhookURL string) (*Inbox, error)
@@ -88,7 +91,10 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if len(bodyBytes) > 512 {
+			bodyBytes = bodyBytes[:512]
+		}
 		return fmt.Errorf("chatwoot API error: status=%d, body=%s", resp.StatusCode, string(bodyBytes))
 	}
 
@@ -212,12 +218,13 @@ func (c *Client) UpdateConversationStatus(ctx context.Context, convID int, statu
 }
 
 type MessageReq struct {
-	Content     string `json:"content,omitempty"`
-	MessageType string `json:"message_type"`
-	Private     bool   `json:"private,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	SourceID    string `json:"source_id,omitempty"`
-	InReplyTo   int    `json:"in_reply_to,omitempty"`
+	Content           string         `json:"content,omitempty"`
+	MessageType       string         `json:"message_type"`
+	Private           bool           `json:"private,omitempty"`
+	ContentType       string         `json:"content_type,omitempty"`
+	SourceID          string         `json:"source_id,omitempty"`
+	SourceReplyID     int            `json:"source_reply_id,omitempty"`
+	ContentAttributes map[string]any `json:"content_attributes,omitempty"`
 }
 
 type Message struct {
@@ -232,6 +239,36 @@ type Message struct {
 func (c *Client) CreateMessage(ctx context.Context, convID int, req MessageReq) (*Message, error) {
 	var result Message
 	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d/messages", c.accountID, convID)
+
+	if len(req.ContentAttributes) > 0 || req.SourceReplyID > 0 {
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+
+		if req.Content != "" {
+			_ = writer.WriteField("content", req.Content)
+		}
+		_ = writer.WriteField("message_type", req.MessageType)
+		if req.SourceID != "" {
+			_ = writer.WriteField("source_id", req.SourceID)
+		}
+		if req.SourceReplyID > 0 {
+			_ = writer.WriteField("source_reply_id", fmt.Sprintf("%d", req.SourceReplyID))
+		}
+		if len(req.ContentAttributes) > 0 {
+			caJSON, err := json.Marshal(req.ContentAttributes)
+			if err == nil {
+				logger.Debug().Str("content_attributes", string(caJSON)).Int("source_reply_id", req.SourceReplyID).Msg("[CW] sending FormData to Chatwoot")
+				_ = writer.WriteField("content_attributes", string(caJSON))
+			}
+		}
+
+		if err := writer.Close(); err != nil {
+			return nil, fmt.Errorf("close multipart: %w", err)
+		}
+
+		return &result, c.do(ctx, http.MethodPost, path, &buf, &result, writer.FormDataContentType())
+	}
+
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -278,6 +315,16 @@ func (c *Client) CreateMessageWithAttachment(ctx context.Context, convID int, co
 func (c *Client) DeleteMessage(ctx context.Context, convID, msgID int) error {
 	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d/messages/%d", c.accountID, convID, msgID)
 	return c.do(ctx, http.MethodDelete, path, nil, nil, "")
+}
+
+func (c *Client) UpdateMessage(ctx context.Context, convID, msgID int, content string) error {
+	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d/messages/%d", c.accountID, convID, msgID)
+	body := map[string]string{"content": content}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPatch, path, data, nil, "")
 }
 
 type Inbox struct {

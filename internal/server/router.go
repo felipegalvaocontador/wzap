@@ -10,6 +10,7 @@ import (
 	"wzap/internal/async"
 	"wzap/internal/handler"
 	"wzap/internal/integrations/chatwoot"
+	"wzap/internal/logger"
 	"wzap/internal/middleware"
 	cloudWA "wzap/internal/provider/whatsapp"
 	"wzap/internal/repo"
@@ -64,10 +65,22 @@ func (s *Server) SetupRoutes() error {
 	historySvc := service.NewHistoryService(messageRepo, historyPool)
 
 	chatwootRepo := chatwoot.NewRepository(s.db.Pool)
-	chatwootSvc := chatwoot.NewService(chatwootRepo, messageRepo, messageSvc)
+	chatwootSvc := chatwoot.NewService(s.ctx, chatwootRepo, messageRepo, messageSvc)
 	chatwootSvc.SetJIDResolver(engine)
 	chatwootSvc.SetMediaDownloader(engine)
 	chatwootSvc.SetServerURL(s.Config.ServerURL)
+	chatwootSvc.SetCache(chatwoot.NewCache(s.Config.RedisURL))
+	if s.nats != nil {
+		chatwootSvc.SetJetStream(s.nats.JS)
+		cwConsumer, cwErr := chatwoot.NewConsumer(s.nats.JS, chatwootSvc)
+		if cwErr != nil {
+			logger.Warn().Err(cwErr).Msg("Failed to create Chatwoot NATS consumer, falling back to sync mode")
+		} else {
+			if err := cwConsumer.Start(s.ctx); err != nil {
+				logger.Warn().Err(err).Msg("Failed to start Chatwoot NATS consumer")
+			}
+		}
+	}
 	chatwootHandler := chatwoot.NewHandler(chatwootSvc, chatwootRepo)
 	disp.AddListener(chatwootSvc)
 
@@ -246,6 +259,7 @@ func (s *Server) SetupRoutes() error {
 	sess.Put("/integrations/chatwoot", chatwootHandler.Configure)
 	sess.Get("/integrations/chatwoot", chatwootHandler.GetConfig)
 	sess.Delete("/integrations/chatwoot", chatwootHandler.DeleteConfig)
+	sess.Post("/integrations/chatwoot/import", chatwootHandler.ImportHistory)
 
 	return nil
 }

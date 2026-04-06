@@ -75,6 +75,12 @@ func configToResp(cfg *ChatwootConfig, webhookURL string) dto.ChatwootConfigResp
 		ConversationPending: cfg.ConversationPending,
 		Enabled:             cfg.Enabled,
 		WebhookURL:          webhookURL,
+		ImportOnConnect:     cfg.ImportOnConnect,
+		ImportPeriod:        cfg.ImportPeriod,
+		TimeoutTextSeconds:  cfg.TimeoutTextSeconds,
+		TimeoutMediaSeconds: cfg.TimeoutMediaSeconds,
+		TimeoutLargeSeconds: cfg.TimeoutLargeSeconds,
+		RedisURL:            maskRedisURL(cfg.RedisURL),
 	}
 }
 
@@ -99,6 +105,23 @@ func (h *Handler) Configure(c *fiber.Ctx) error {
 		return nil
 	}
 
+	timeoutText := 10
+	if req.TimeoutTextSeconds != nil {
+		timeoutText = *req.TimeoutTextSeconds
+	}
+	timeoutMedia := 60
+	if req.TimeoutMediaSeconds != nil {
+		timeoutMedia = *req.TimeoutMediaSeconds
+	}
+	timeoutLarge := 300
+	if req.TimeoutLargeSeconds != nil {
+		timeoutLarge = *req.TimeoutLargeSeconds
+	}
+	importPeriod := "7d"
+	if req.ImportPeriod != "" {
+		importPeriod = req.ImportPeriod
+	}
+
 	cfg := &ChatwootConfig{
 		SessionID:           sessionID,
 		URL:                 req.URL,
@@ -111,6 +134,12 @@ func (h *Handler) Configure(c *fiber.Ctx) error {
 		ReopenConversation:  req.ReopenConversation == nil || *req.ReopenConversation,
 		MergeBRContacts:     req.MergeBRContacts == nil || *req.MergeBRContacts,
 		ConversationPending: req.ConversationPending != nil && *req.ConversationPending,
+		ImportOnConnect:     req.ImportOnConnect != nil && *req.ImportOnConnect,
+		ImportPeriod:        importPeriod,
+		TimeoutTextSeconds:  timeoutText,
+		TimeoutMediaSeconds: timeoutMedia,
+		TimeoutLargeSeconds: timeoutLarge,
+		RedisURL:            req.RedisURL,
 	}
 
 	ignoreJIDs := make([]string, 0, len(req.IgnoreJIDs))
@@ -128,11 +157,6 @@ func (h *Handler) Configure(c *fiber.Ctx) error {
 		}
 	}
 	cfg.IgnoreJIDs = ignoreJIDs
-
-	autoCreate := req.AutoCreateInbox != nil && *req.AutoCreateInbox
-	if autoCreate && cfg.InboxID == 0 {
-		cfg.InboxID = 0
-	}
 
 	if err := h.service.Configure(c.Context(), cfg); err != nil {
 		logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to configure Chatwoot")
@@ -205,7 +229,10 @@ func (h *Handler) IncomingWebhook(c *fiber.Ctx) error {
 	}
 
 	hmacHeader := c.Get("X-Chatwoot-Hmac-Sha256")
-	if hmacHeader != "" {
+	if cfg.Token != "" {
+		if hmacHeader == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.ErrorResp("Unauthorized", "Missing HMAC signature"))
+		}
 		body := c.Body()
 		mac := hmac.New(sha256.New, []byte(cfg.Token))
 		mac.Write(body)
@@ -217,20 +244,52 @@ func (h *Handler) IncomingWebhook(c *fiber.Ctx) error {
 	}
 
 	var body dto.ChatwootWebhookPayload
-	if err := json.Unmarshal(c.Body(), &body); err != nil {
-		logger.Warn().Err(err).Str("session", sessionID).Str("rawBody", string(c.Body()[:min(len(c.Body()), 500)])).Msg("[CW] failed to parse webhook payload")
+	rawBody := c.Body()
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		logger.Warn().Err(err).Str("session", sessionID).Str("contentType", c.Get("Content-Type")).Msg("[CW] failed to parse webhook payload")
 		return c.Status(fiber.StatusBadRequest).JSON(dto.ErrorResp("Invalid Request", "Failed to parse webhook payload"))
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := h.service.HandleIncomingWebhook(ctx, sessionID, body); err != nil {
-			logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to handle Chatwoot webhook")
-		}
-	}()
+	if h.service.js != nil {
+		go func() {
+			pCtx, pCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer pCancel()
+			if err := publishOutbound(pCtx, h.service.js, sessionID, rawBody); err != nil {
+				logger.Warn().Err(err).Str("session", sessionID).Msg("[CW] failed to publish outbound webhook, falling back to sync")
+				sCtx, sCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer sCancel()
+				if err := h.service.HandleIncomingWebhook(sCtx, sessionID, body); err != nil {
+					logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to handle Chatwoot webhook")
+				}
+				return
+			}
+		}()
+	} else {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := h.service.HandleIncomingWebhook(ctx, sessionID, body); err != nil {
+				logger.Warn().Err(err).Str("session", sessionID).Msg("Failed to handle Chatwoot webhook")
+			}
+		}()
+	}
 
 	return c.Status(fiber.StatusOK).JSON(dto.SuccessResp(nil))
+}
+
+// ImportHistory
+// @Summary Trigger manual history import from WhatsApp to Chatwoot
+// @Tags Chatwoot
+// @Accept json
+// @Produce json
+// @Param sessionId path string true "Session ID"
+// @Param body body dto.ImportHistoryReq true "Import configuration"
+// @Success 202 {object} dto.APIResponse
+// @Failure 400 {object} dto.APIError
+// @Failure 401 {object} dto.APIError
+// @Router /sessions/{sessionId}/integrations/chatwoot/import [post]
+func (h *Handler) ImportHistory(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotImplemented).JSON(dto.ErrorResp("Not Implemented", "History import is not yet implemented"))
 }
 
 func mustGetSessionID(c *fiber.Ctx) string {

@@ -1,5 +1,5 @@
 -- =====================================================
--- wzap Database Schema
+-- wzap Database Schema — Core Tables
 -- =====================================================
 
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -11,26 +11,31 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- =====================================================
--- Sessions Table
+-- Sessions
 -- =====================================================
 CREATE TABLE IF NOT EXISTS wz_sessions (
-    id                   VARCHAR(100) PRIMARY KEY,
-    name                 VARCHAR(100) NOT NULL UNIQUE,
-    token                VARCHAR(255) NOT NULL UNIQUE,
-    jid                  VARCHAR(255) NOT NULL DEFAULT '',
-    qr_code              TEXT NOT NULL DEFAULT '',
-    connected            INTEGER NOT NULL DEFAULT 0,
-    status               VARCHAR(50) NOT NULL DEFAULT 'disconnected',
-    engine               VARCHAR(20) DEFAULT 'whatsmeow',
+    id                   VARCHAR(100)  PRIMARY KEY,
+    name                 VARCHAR(100)  NOT NULL UNIQUE,
+    token                VARCHAR(255)  NOT NULL UNIQUE,
+    jid                  VARCHAR(255)  NOT NULL DEFAULT '',
+    qr_code              TEXT          NOT NULL DEFAULT '',
+    status               VARCHAR(50)   NOT NULL DEFAULT 'disconnected',
+    connected            INTEGER       NOT NULL DEFAULT 0,
+    engine               VARCHAR(20)   NOT NULL DEFAULT 'whatsmeow',
+
+    -- Cloud API fields
     phone_number_id      VARCHAR(100),
     access_token         TEXT,
     business_account_id  VARCHAR(100),
     app_secret           TEXT,
     webhook_verify_token VARCHAR(255),
-    proxy                JSONB NOT NULL DEFAULT '{}',
-    settings             JSONB NOT NULL DEFAULT '{}',
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+    -- Extensible config
+    proxy                JSONB         NOT NULL DEFAULT '{}',
+    settings             JSONB         NOT NULL DEFAULT '{}',
+
+    created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_wz_sessions_name
@@ -50,24 +55,19 @@ CREATE TRIGGER trg_wz_sessions_updated_at
     BEFORE UPDATE ON wz_sessions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-COMMENT ON TABLE  wz_sessions          IS 'WhatsApp sessions managed by wzap';
-COMMENT ON COLUMN wz_sessions.name     IS 'Unique URL-safe session identifier (^[a-zA-Z0-9_-]+$)';
-COMMENT ON COLUMN wz_sessions.token    IS 'Session token for authentication';
-COMMENT ON COLUMN wz_sessions.jid      IS 'WhatsApp device JID from whatsmeow (set after pairing)';
-
 -- =====================================================
--- Webhooks Table
+-- Webhooks
 -- =====================================================
 CREATE TABLE IF NOT EXISTS wz_webhooks (
-    id           VARCHAR(100) PRIMARY KEY,
-    session_id   VARCHAR(100) NOT NULL REFERENCES wz_sessions(id) ON DELETE CASCADE,
+    id           VARCHAR(100)  PRIMARY KEY,
+    session_id   VARCHAR(100)  NOT NULL REFERENCES wz_sessions(id) ON DELETE CASCADE,
     url          VARCHAR(2048) NOT NULL,
     secret       VARCHAR(255),
-    events       JSONB NOT NULL DEFAULT '[]',
-    enabled      BOOLEAN NOT NULL DEFAULT true,
-    nats_enabled BOOLEAN NOT NULL DEFAULT false,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    events       JSONB         NOT NULL DEFAULT '[]',
+    enabled      BOOLEAN       NOT NULL DEFAULT true,
+    nats_enabled BOOLEAN       NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_wz_webhooks_session_id
@@ -79,6 +79,3 @@ DROP TRIGGER IF EXISTS trg_wz_webhooks_updated_at ON wz_webhooks;
 CREATE TRIGGER trg_wz_webhooks_updated_at
     BEFORE UPDATE ON wz_webhooks
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-COMMENT ON TABLE  wz_webhooks            IS 'Webhook configurations per session';
-COMMENT ON COLUMN wz_webhooks.session_id IS 'FK to wz_sessions.id';

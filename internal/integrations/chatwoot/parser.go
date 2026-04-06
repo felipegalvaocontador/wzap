@@ -4,17 +4,41 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"wzap/internal/model"
 )
 
+type flexTimestamp int64
+
+func (ft *flexTimestamp) UnmarshalJSON(b []byte) error {
+	var n int64
+	if err := json.Unmarshal(b, &n); err == nil {
+		*ft = flexTimestamp(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("cannot unmarshal timestamp from %s", string(b))
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			*ft = flexTimestamp(t.Unix())
+			return nil
+		}
+	}
+	return fmt.Errorf("cannot parse timestamp string %q", s)
+}
+
 type waMessageInfo struct {
-	Chat     string `json:"Chat"`
-	Sender   string `json:"Sender"`
-	IsFromMe bool   `json:"IsFromMe"`
-	IsGroup  bool   `json:"IsGroup"`
-	ID       string `json:"ID"`
-	PushName string `json:"PushName"`
+	Chat      string        `json:"Chat"`
+	Sender    string        `json:"Sender"`
+	IsFromMe  bool          `json:"IsFromMe"`
+	IsGroup   bool          `json:"IsGroup"`
+	ID        string        `json:"ID"`
+	PushName  string        `json:"PushName"`
+	Timestamp flexTimestamp `json:"Timestamp"`
 }
 
 type waMessagePayload struct {
@@ -23,18 +47,18 @@ type waMessagePayload struct {
 }
 
 type waReceiptPayload struct {
-	Type       string   `json:"Type"`
-	MessageIDs []string `json:"MessageIDs"`
-	Chat       string   `json:"Chat"`
-	Sender     string   `json:"Sender"`
-	Timestamp  int64    `json:"Timestamp"`
+	Type       string        `json:"Type"`
+	MessageIDs []string      `json:"MessageIDs"`
+	Chat       string        `json:"Chat"`
+	Sender     string        `json:"Sender"`
+	Timestamp  flexTimestamp `json:"Timestamp"`
 }
 
 type waDeletePayload struct {
-	Chat      string `json:"Chat"`
-	Sender    string `json:"Sender"`
-	MessageID string `json:"MessageID"`
-	Timestamp int64  `json:"Timestamp"`
+	Chat      string        `json:"Chat"`
+	Sender    string        `json:"Sender"`
+	MessageID string        `json:"MessageID"`
+	Timestamp flexTimestamp `json:"Timestamp"`
 }
 
 func parseEnvelopeData(payload []byte, target interface{}) error {
@@ -140,6 +164,36 @@ func extractMediaInfo(msg map[string]interface{}) *mediaInfo {
 	return nil
 }
 
+var msgTypeKeys = []struct {
+	key     string
+	msgType string
+}{
+	{"imageMessage", "image"},
+	{"videoMessage", "video"},
+	{"audioMessage", "audio"},
+	{"documentMessage", "document"},
+	{"stickerMessage", "sticker"},
+	{"contactMessage", "contact"},
+	{"locationMessage", "location"},
+	{"listMessage", "list"},
+	{"buttonsMessage", "buttons"},
+	{"pollCreationMessage", "poll"},
+	{"pollCreationMessageV3", "poll"},
+	{"documentWithCaptionMessage", "document"},
+}
+
+func detectMessageType(msg map[string]interface{}) string {
+	if msg == nil {
+		return "text"
+	}
+	for _, entry := range msgTypeKeys {
+		if _, ok := msg[entry.key]; ok {
+			return entry.msgType
+		}
+	}
+	return "text"
+}
+
 func extractTextFromMessage(msg map[string]interface{}) string {
 	if msg == nil {
 		return ""
@@ -196,12 +250,109 @@ func extractTextFromMessage(msg map[string]interface{}) string {
 
 	if contactMsg := getMapField(msg, "contactMessage"); contactMsg != nil {
 		if vcard := getStringField(contactMsg, "vcard"); vcard != "" {
-			return vcard
+			return formatVCard(vcard)
 		}
 		return getStringField(contactMsg, "displayName")
 	}
 
+	if contactsMsg := getMapField(msg, "contactsArrayMessage"); contactsMsg != nil {
+		contacts, _ := contactsMsg["contacts"].([]interface{})
+		var parts []string
+		for _, c := range contacts {
+			if cm, ok := c.(map[string]interface{}); ok {
+				if vcard := getStringField(cm, "vcard"); vcard != "" {
+					parts = append(parts, formatVCard(vcard))
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return fmt.Sprintf("📇 Contatos:\n%s", joinStrings(parts, "\n\n"))
+		}
+	}
+
 	return ""
+}
+
+func formatVCard(vcard string) string {
+	name := ""
+	var phones []string
+	for _, line := range splitLines(vcard) {
+		if startsWithCI(line, "FN:") {
+			name = line[3:]
+		} else if startsWithCI(line, "TEL") {
+			if idx := lastIndex(line, ":"); idx >= 0 {
+				phones = append(phones, line[idx+1:])
+			}
+		}
+	}
+	if name == "" {
+		return vcard
+	}
+	result := "📇 " + name
+	for _, phone := range phones {
+		result += "\n📞 " + phone
+	}
+	return result
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			line := s[start:i]
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+			lines = append(lines, line)
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+func startsWithCI(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		sc := s[i]
+		pc := prefix[i]
+		if sc >= 'a' && sc <= 'z' {
+			sc -= 32
+		}
+		if pc >= 'a' && pc <= 'z' {
+			pc -= 32
+		}
+		if sc != pc {
+			return false
+		}
+	}
+	return true
+}
+
+func lastIndex(s, sep string) int {
+	idx := -1
+	for i := 0; i <= len(s)-len(sep); i++ {
+		if s[i:i+len(sep)] == sep {
+			idx = i
+		}
+	}
+	return idx
+}
+
+func joinStrings(parts []string, sep string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
+	}
+	return result
 }
 
 func getStringField(m map[string]interface{}, key string) string {
@@ -240,6 +391,9 @@ func extractStanzaID(msg map[string]interface{}) string {
 		if id := getStringField(ci, "stanzaId"); id != "" {
 			return id
 		}
+		if id := getStringField(ci, "stanzaID"); id != "" {
+			return id
+		}
 	}
 
 	msgTypes := []string{
@@ -262,6 +416,50 @@ func extractStanzaID(msg map[string]interface{}) string {
 		}
 		if id := getStringField(ci, "stanzaId"); id != "" {
 			return id
+		}
+		if id := getStringField(ci, "stanzaID"); id != "" {
+			return id
+		}
+	}
+
+	return ""
+}
+
+func extractQuotedMessageText(msg map[string]interface{}) string {
+	if msg == nil {
+		return ""
+	}
+
+	msgTypes := []string{
+		"extendedTextMessage",
+		"imageMessage",
+		"videoMessage",
+		"audioMessage",
+		"documentMessage",
+		"stickerMessage",
+	}
+
+	for _, key := range msgTypes {
+		sub, ok := msg[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		ci, ok := sub["contextInfo"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		quoted, ok := ci["quotedMessage"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if conv, ok := quoted["conversation"].(string); ok && conv != "" {
+			text := strings.Trim(conv, `"`)
+			return strings.TrimSpace(text)
+		}
+		if extText, ok := quoted["extendedTextMessage"].(map[string]interface{}); ok {
+			if text, ok := extText["text"].(string); ok && text != "" {
+				return strings.TrimSpace(text)
+			}
 		}
 	}
 

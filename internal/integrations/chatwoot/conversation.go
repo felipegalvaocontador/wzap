@@ -4,19 +4,34 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"wzap/internal/logger"
 )
 
 func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootConfig, chatJID, pushName string) (int, error) {
-	cacheKey := cfg.SessionID + "+" + chatJID
+	if convID, _, ok := s.cache.GetConv(ctx, cfg.SessionID, chatJID); ok {
+		return convID, nil
+	}
 
-	val, _ := s.convCache.LoadOrStore(cacheKey, &sync.Mutex{})
-	mu := val.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+	key := cfg.SessionID + "+" + chatJID
+	result, err, _ := s.convFlight.Do(key, func() (interface{}, error) {
+		if convID, _, ok := s.cache.GetConv(ctx, cfg.SessionID, chatJID); ok {
+			return convID, nil
+		}
+		return s.findOrCreateConversationSlowPath(ctx, cfg, chatJID, pushName)
+	})
+	if err != nil {
+		return 0, err
+	}
 
+	convID, ok := result.(int)
+	if !ok {
+		return 0, fmt.Errorf("invalid conversation id type %T", result)
+	}
+	return convID, nil
+}
+
+func (s *Service) findOrCreateConversationSlowPath(ctx context.Context, cfg *ChatwootConfig, chatJID, pushName string) (int, error) {
 	client := s.clientFn(cfg)
 	phone := extractPhone(chatJID)
 
@@ -74,9 +89,11 @@ func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootCon
 				if err := client.UpdateConversationStatus(ctx, conv.ID, reopenStatus); err != nil {
 					logger.Warn().Err(err).Int("convID", conv.ID).Msg("Failed to reopen conversation")
 				}
+				s.cache.SetConv(ctx, cfg.SessionID, chatJID, conv.ID, contactID)
 				return conv.ID, nil
 			}
 			if conv.Status != "resolved" {
+				s.cache.SetConv(ctx, cfg.SessionID, chatJID, conv.ID, contactID)
 				return conv.ID, nil
 			}
 		}
@@ -96,6 +113,7 @@ func (s *Service) findOrCreateConversation(ctx context.Context, cfg *ChatwootCon
 		return 0, fmt.Errorf("failed to create conversation: %w", err)
 	}
 
+	s.cache.SetConv(ctx, cfg.SessionID, chatJID, conv.ID, contactID)
 	return conv.ID, nil
 }
 

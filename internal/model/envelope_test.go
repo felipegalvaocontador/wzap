@@ -84,8 +84,8 @@ func TestBuildEventEnvelope_DistinctEventIDs(t *testing.T) {
 	b2, _ := BuildEventEnvelope("s", "n", EventConnected, data)
 
 	var e1, e2 EventEnvelope
-	json.Unmarshal(b1, &e1)
-	json.Unmarshal(b2, &e2)
+	_ = json.Unmarshal(b1, &e1)
+	_ = json.Unmarshal(b2, &e2)
 
 	if e1.EventID == e2.EventID {
 		t.Error("each envelope should have a unique eventId")
@@ -192,7 +192,7 @@ func TestBuildEventEnvelope_LargeData(t *testing.T) {
 		t.Fatalf("parse large: %v", err)
 	}
 	var parsed map[string]interface{}
-	json.Unmarshal(env.Data, &parsed)
+	_ = json.Unmarshal(env.Data, &parsed)
 	if len(parsed["body"].(string)) != 1024*1024 {
 		t.Error("body length mismatch")
 	}

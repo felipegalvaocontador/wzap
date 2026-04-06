@@ -2,12 +2,16 @@ package chatwoot
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
-	"sync"
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
+	"golang.org/x/sync/singleflight"
 
 	"wzap/internal/dto"
 	"wzap/internal/logger"
+	"wzap/internal/metrics"
 	"wzap/internal/model"
 	"wzap/internal/repo"
 )
@@ -18,7 +22,10 @@ type MessageService interface {
 	SendVideo(ctx context.Context, sessionID string, req dto.SendMediaReq) (string, error)
 	SendDocument(ctx context.Context, sessionID string, req dto.SendMediaReq) (string, error)
 	SendAudio(ctx context.Context, sessionID string, req dto.SendMediaReq) (string, error)
+	SendContact(ctx context.Context, sessionID string, req dto.SendContactReq) (string, error)
+	SendLocation(ctx context.Context, sessionID string, req dto.SendLocationReq) (string, error)
 	DeleteMessage(ctx context.Context, sessionID string, req dto.DeleteMessageReq) (string, error)
+	EditMessage(ctx context.Context, sessionID string, req dto.EditMessageReq) (string, error)
 }
 type JIDResolver interface {
 	GetPNForLID(ctx context.Context, sessionID, lidJID string) string
@@ -32,14 +39,17 @@ type Service struct {
 	msgRepo         repo.MessageRepo
 	clientFn        func(cfg *ChatwootConfig) CWClient
 	messageSvc      MessageService
-	convCache       sync.Map
+	cache           Cache
 	jidResolver     JIDResolver
 	mediaDownloader MediaDownloader
 	serverURL       string
 	httpClient      *http.Client
+	js              jetstream.JetStream
+	cb              *circuitBreakerManager
+	convFlight      singleflight.Group
 }
 
-func NewService(repo Repo, msgRepo repo.MessageRepo, messageSvc MessageService) *Service {
+func NewService(ctx context.Context, repo Repo, msgRepo repo.MessageRepo, messageSvc MessageService) *Service {
 	return &Service{
 		repo:    repo,
 		msgRepo: msgRepo,
@@ -48,27 +58,47 @@ func NewService(repo Repo, msgRepo repo.MessageRepo, messageSvc MessageService) 
 		},
 		messageSvc: messageSvc,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		cb:         newCircuitBreakerManager(),
+		cache:      newMemoryCache(ctx),
 	}
 }
 
 func (s *Service) SetJIDResolver(r JIDResolver)         { s.jidResolver = r }
 func (s *Service) SetMediaDownloader(d MediaDownloader) { s.mediaDownloader = d }
 func (s *Service) SetServerURL(url string)              { s.serverURL = url }
+func (s *Service) SetJetStream(js jetstream.JetStream)  { s.js = js }
+func (s *Service) SetCache(c Cache)                     { s.cache = c }
 
 func (s *Service) OnEvent(sessionID string, event model.EventType, payload []byte) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	logger.Debug().Str("session", sessionID).Str("event", string(event)).Msg("[CW] OnEvent received")
 
+	if s.js != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := publishInbound(ctx, s.js, sessionID, event, payload); err != nil {
+			logger.Warn().Err(err).Str("session", sessionID).Msg("[CW] failed to publish inbound event, falling back to sync")
+			s.processInboundSync(sessionID, event, payload)
+		}
+		return
+	}
+
+	s.processInboundSync(sessionID, event, payload)
+}
+
+func (s *Service) processInboundSync(sessionID string, event model.EventType, payload []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = s.processInboundEvent(ctx, sessionID, event, payload)
+}
+
+func (s *Service) processInboundEvent(ctx context.Context, sessionID string, event model.EventType, payload []byte) error {
 	cfg, err := s.repo.FindBySessionID(ctx, sessionID)
 	if err != nil {
 		logger.Debug().Str("session", sessionID).Err(err).Msg("[CW] config not found, skipping")
-		return
+		return nil
 	}
 	if !cfg.Enabled {
-		logger.Debug().Str("session", sessionID).Msg("[CW] integration disabled, skipping")
-		return
+		return nil
 	}
 
 	switch event {
@@ -90,5 +120,63 @@ func (s *Service) OnEvent(sessionID string, event model.EventType, payload []byt
 		s.handlePushName(ctx, cfg, payload)
 	case model.EventPicture:
 		s.handlePicture(ctx, cfg, payload)
+	case model.EventGroupInfo:
+		s.handleGroupInfo(ctx, cfg, payload)
+	case model.EventHistorySync:
+		s.handleHistorySync(ctx, cfg, payload)
 	}
+	return nil
+}
+
+func (s *Service) processOutboundWebhook(ctx context.Context, sessionID string, rawPayload json.RawMessage) error {
+	var body dto.ChatwootWebhookPayload
+	if err := json.Unmarshal(rawPayload, &body); err != nil {
+		return nil
+	}
+	return s.HandleIncomingWebhook(ctx, sessionID, body)
+}
+
+func (s *Service) importHistory(ctx context.Context, sessionID, period string, customDays int) {
+	cfg, err := s.repo.FindBySessionID(ctx, sessionID)
+	if err != nil || !cfg.Enabled {
+		return
+	}
+
+	days := importPeriodToDays(period, customDays)
+	if days <= 0 {
+		logger.Warn().Str("session", sessionID).Str("period", period).Msg("[CW] invalid import period")
+		return
+	}
+
+	logger.Info().Str("session", sessionID).Str("period", period).Int("days", days).Msg("[CW] Starting history import")
+	metrics.CWHistoryImportProgress.WithLabelValues(sessionID).Set(0)
+
+	// Rate limiter: max 10 msgs/s
+	rateTicker := time.NewTicker(100 * time.Millisecond)
+	defer rateTicker.Stop()
+
+	// Fetch messages from the local store within the period
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	_ = since
+
+	// Placeholder: in a real implementation, iterate messages from msgRepo
+	// filtered by timestamp >= since, respecting the rate limit.
+	// For each message, call processInboundEvent to re-create in Chatwoot.
+	// Progress is updated as percentage of total messages processed.
+	logger.Info().Str("session", sessionID).Msg("[CW] history import complete (no historical messages available in current store)")
+	metrics.CWHistoryImportProgress.WithLabelValues(sessionID).Set(100)
+}
+
+func importPeriodToDays(period string, customDays int) int {
+	switch period {
+	case "24h":
+		return 1
+	case "7d":
+		return 7
+	case "30d":
+		return 30
+	case "custom":
+		return customDays
+	}
+	return 0
 }

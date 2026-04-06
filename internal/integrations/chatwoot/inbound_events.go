@@ -3,6 +3,8 @@ package chatwoot
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"wzap/internal/logger"
 )
@@ -76,6 +78,18 @@ func (s *Service) handleConnected(ctx context.Context, cfg *ChatwootConfig, payl
 		Content:     "✅ Session connected",
 		MessageType: "outgoing",
 	})
+
+	if cfg.ImportOnConnect {
+		period := cfg.ImportPeriod
+		if period == "" {
+			period = "7d"
+		}
+		go func() {
+			importCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			s.importHistory(importCtx, cfg.SessionID, period, 0)
+		}()
+	}
 }
 
 func (s *Service) handleDisconnected(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
@@ -204,4 +218,94 @@ func (s *Service) handlePicture(ctx context.Context, cfg *ChatwootConfig, payloa
 	_ = client.UpdateContact(ctx, contacts[0].ID, UpdateContactReq{
 		AdditionalAttributes: map[string]any{"avatar_url": data.URL},
 	})
+}
+
+func (s *Service) handleGroupInfo(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
+	var data struct {
+		JID       string `json:"JID"`
+		Timestamp int64  `json:"Timestamp"`
+		Updates   []struct {
+			Type       string `json:"Type"`
+			JID        string `json:"JID"`
+			Participant string `json:"Participant"`
+			Name       string `json:"Name"`
+			Description string `json:"Description"`
+			Announce    bool   `json:"Announce"`
+			Ephemeral   int    `json:"Ephemeral"`
+			NewInviteLink string `json:"NewInviteLink"`
+		} `json:"Updates"`
+		Sender struct {
+			User   string `json:"User"`
+			Server string `json:"Server"`
+		} `json:"Sender"`
+	}
+	if err := parseEnvelopeData(payload, &data); err != nil {
+		return
+	}
+	if data.JID == "" {
+		return
+	}
+
+	groupJID := data.JID
+	convID, err := s.findOrCreateConversation(ctx, cfg, groupJID, "")
+	if err != nil {
+		logger.Warn().Err(err).Str("group", groupJID).Msg("[CW] failed to get group conversation for event")
+		return
+	}
+
+	client := s.clientFn(cfg)
+	sender := data.Sender.User
+
+	for _, upd := range data.Updates {
+		var notif string
+		participant := upd.Participant
+		if participant == "" {
+			participant = upd.JID
+		}
+		participantPhone := extractPhone(participant)
+
+		switch upd.Type {
+		case "add":
+			notif = fmt.Sprintf("➕ %s entrou no grupo", participantPhone)
+		case "remove":
+			notif = fmt.Sprintf("➖ %s foi removido do grupo por %s", participantPhone, sender)
+		case "leave":
+			notif = fmt.Sprintf("🚪 %s saiu do grupo", participantPhone)
+		case "promote":
+			notif = fmt.Sprintf("⬆️ %s foi promovido a admin por %s", participantPhone, sender)
+		case "demote":
+			notif = fmt.Sprintf("⬇️ %s foi rebaixado de admin por %s", participantPhone, sender)
+		case "subject":
+			notif = fmt.Sprintf("📝 Nome do grupo alterado para: %s", upd.Name)
+		case "description":
+			notif = fmt.Sprintf("📋 Descrição do grupo atualizada: %s", upd.Description)
+		case "invite":
+			if upd.NewInviteLink != "" {
+				notif = fmt.Sprintf("🔗 Link de convite do grupo: %s", upd.NewInviteLink)
+			}
+		case "announce":
+			if upd.Announce {
+				notif = "🔒 Grupo restrito a admins"
+			} else {
+				notif = "🔓 Grupo aberto para todos enviarem mensagens"
+			}
+		case "ephemeral":
+			if upd.Ephemeral > 0 {
+				notif = fmt.Sprintf("⏳ Mensagens temporárias ativadas (%d segundos)", upd.Ephemeral)
+			} else {
+				notif = "⏳ Mensagens temporárias desativadas"
+			}
+		}
+
+		if notif != "" && !strings.HasSuffix(groupJID, "@s.whatsapp.net") {
+			_, _ = client.CreateMessage(ctx, convID, MessageReq{
+				Content:     notif,
+				MessageType: "activity",
+			})
+		}
+	}
+}
+
+func (s *Service) handleHistorySync(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
+	logger.Debug().Str("session", cfg.SessionID).Msg("[CW] HistorySync received (no-op until import triggered)")
 }

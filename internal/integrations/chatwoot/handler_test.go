@@ -2,9 +2,12 @@ package chatwoot
 
 import (
 	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
-	"sync"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -21,10 +24,11 @@ func newChatwootApp() (*fiber.App, *mockRepo, *mockCWClient) {
 	repository := &mockRepo{}
 
 	svc := &Service{
-		repo:      repository,
-		msgRepo:   &mockMsgRepo{},
-		clientFn:  func(cfg *ChatwootConfig) CWClient { return mockClient },
-		convCache: sync.Map{},
+		repo:     repository,
+		msgRepo:  &mockMsgRepo{},
+		clientFn: func(cfg *ChatwootConfig) CWClient { return mockClient },
+		cache:    newMemoryCache(context.Background()),
+		cb:       newCircuitBreakerManager(),
 	}
 
 	h := NewHandler(svc, repository)
@@ -41,6 +45,7 @@ func newChatwootApp() (*fiber.App, *mockRepo, *mockCWClient) {
 	app.Put("/sessions/:sessionId/integrations/chatwoot", sessionMW, h.Configure)
 	app.Get("/sessions/:sessionId/integrations/chatwoot", sessionMW, h.GetConfig)
 	app.Delete("/sessions/:sessionId/integrations/chatwoot", sessionMW, h.DeleteConfig)
+	app.Post("/sessions/:sessionId/integrations/chatwoot/import", sessionMW, h.ImportHistory)
 	app.Post("/chatwoot/webhook/:sessionId", h.IncomingWebhook)
 
 	return app, repository, mockClient
@@ -185,7 +190,7 @@ func TestGetConfig_ResponseShapeParity(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 
 	if success, ok := result["success"].(bool); !ok || !success {
 		t.Errorf("expected success=true, got %v", result["success"])
@@ -204,6 +209,37 @@ func TestGetConfig_ResponseShapeParity(t *testing.T) {
 
 	if data["inboxId"].(float64) != 5 {
 		t.Errorf("expected inboxId=5, got %v", data["inboxId"])
+	}
+}
+
+func TestGetConfig_MasksRedisURL(t *testing.T) {
+	app, repo, _ := newChatwootApp()
+	repo.cfg = &ChatwootConfig{
+		SessionID: "test-session",
+		URL:       "https://app.chatwoot.com",
+		AccountID: 1,
+		InboxID:   5,
+		RedisURL:  "redis://:secret@redis.host:6379/0",
+		Enabled:   true,
+	}
+
+	req := httptest.NewRequest("GET", "/sessions/test-session/integrations/chatwoot", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	data, _ := result["data"].(map[string]interface{})
+	if data["redisUrl"] != "redis://***@redis.host:6379/0" {
+		t.Errorf("expected masked redisUrl, got %v", data["redisUrl"])
 	}
 }
 
@@ -323,7 +359,7 @@ func TestConfigure_ResponseUsesSuccessEnvelope(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 
 	if _, ok := result["success"]; !ok {
 		t.Error("response should contain 'success' field (standard envelope)")
@@ -348,5 +384,103 @@ func TestJIDsContainGroup(t *testing.T) {
 	}
 	if jidsContainGroup(nil) {
 		t.Error("nil should not contain group marker")
+	}
+}
+
+func TestImportHistory_Returns501(t *testing.T) {
+	app, _, _ := newChatwootApp()
+
+	req := httptest.NewRequest("POST", "/sessions/test-session/integrations/chatwoot/import", bytes.NewReader([]byte(`{"period":"7d"}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != 501 {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	success, _ := result["success"].(bool)
+	if success {
+		t.Fatal("expected success=false")
+	}
+
+	if result["error"] != "Not Implemented" {
+		t.Errorf("expected error Not Implemented, got %v", result["error"])
+	}
+	if result["message"] != "History import is not yet implemented" {
+		t.Errorf("unexpected message: %v", result["message"])
+	}
+}
+
+func TestIncomingWebhook_MissingHMAC_WithToken(t *testing.T) {
+	app, repo, _ := newChatwootApp()
+	repo.cfg = &ChatwootConfig{
+		SessionID: "test-session",
+		Enabled:   true,
+		Token:     "test-token",
+	}
+
+	req := httptest.NewRequest("POST", "/chatwoot/webhook/test-session", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != 401 {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestIncomingWebhook_ValidHMAC(t *testing.T) {
+	app, repo, _ := newChatwootApp()
+	repo.cfg = &ChatwootConfig{
+		SessionID: "test-session",
+		Enabled:   true,
+		Token:     "test-token",
+	}
+
+	body := []byte(`{}`)
+	mac := hmac.New(sha256.New, []byte(repo.cfg.Token))
+	mac.Write(body)
+	signature := hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest("POST", "/chatwoot/webhook/test-session", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Chatwoot-Hmac-Sha256", signature)
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestIncomingWebhook_EmptyToken_NoHMAC(t *testing.T) {
+	app, repo, _ := newChatwootApp()
+	repo.cfg = &ChatwootConfig{
+		SessionID: "test-session",
+		Enabled:   true,
+		Token:     "",
+	}
+
+	req := httptest.NewRequest("POST", "/chatwoot/webhook/test-session", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }

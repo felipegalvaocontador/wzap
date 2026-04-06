@@ -1,6 +1,10 @@
 package chatwoot
 
-import "time"
+import (
+	"net/url"
+	"strings"
+	"time"
+)
 
 type ChatwootConfig struct {
 	SessionID           string    `json:"sessionId"`
@@ -17,6 +21,33 @@ type ChatwootConfig struct {
 	IgnoreJIDs          []string  `json:"ignoreJids"`
 	ConversationPending bool      `json:"conversationPending"`
 	Enabled             bool      `json:"enabled"`
+	ImportOnConnect     bool      `json:"importOnConnect"`
+	ImportPeriod        string    `json:"importPeriod"`
+	TimeoutTextSeconds  int       `json:"timeoutTextSeconds"`
+	TimeoutMediaSeconds int       `json:"timeoutMediaSeconds"`
+	TimeoutLargeSeconds int       `json:"timeoutLargeSeconds"`
+	RedisURL            string    `json:"redisUrl"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+}
+
+func maskRedisURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if parsed.User == nil {
+		return rawURL
+	}
+	if _, hasPassword := parsed.User.Password(); !hasPassword {
+		return rawURL
+	}
+
+	parsed.User = nil
+	masked := parsed.String()
+	return strings.Replace(masked, "://", "://***@", 1)
 }

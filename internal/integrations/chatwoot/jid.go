@@ -38,6 +38,13 @@ func jidsContainGroup(ignoreJIDs []string) bool {
 	return false
 }
 
+func isValidWhatsAppJID(jid string) bool {
+	return strings.HasSuffix(jid, "@s.whatsapp.net") ||
+		strings.HasSuffix(jid, "@g.us") ||
+		strings.HasSuffix(jid, "@lid") ||
+		strings.HasSuffix(jid, "@broadcast")
+}
+
 func extractPhone(jid string) string {
 	jid = strings.Split(jid, "@")[0]
 	jid = strings.TrimPrefix(jid, "+")
@@ -48,8 +55,7 @@ func addOrRemoveBR9thDigit(phone string) string {
 	if !strings.HasPrefix(phone, "55") {
 		return phone
 	}
-	parts := strings.SplitN(phone, "", 13)
-	if len(parts) < 12 {
+	if len(phone) < 12 {
 		return phone
 	}
 	ddd := phone[2:4]

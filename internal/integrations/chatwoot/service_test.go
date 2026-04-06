@@ -3,9 +3,7 @@ package chatwoot
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
@@ -307,113 +305,6 @@ func TestShouldIgnoreJID(t *testing.T) {
 	}
 }
 
-type mockCWClient struct {
-	messages        []MessageReq
-	contacts        []Contact
-	conversations   []Conversation
-	lastMessageType string
-}
-
-func (m *mockCWClient) FilterContacts(ctx context.Context, phone string) ([]Contact, error) {
-	return m.contacts, nil
-}
-
-func (m *mockCWClient) CreateContact(ctx context.Context, req CreateContactReq) (*Contact, error) {
-	return &Contact{ID: 1}, nil
-}
-
-func (m *mockCWClient) UpdateContact(ctx context.Context, id int, req UpdateContactReq) error {
-	return nil
-}
-
-func (m *mockCWClient) ListContactConversations(ctx context.Context, contactID int) ([]Conversation, error) {
-	return m.conversations, nil
-}
-
-func (m *mockCWClient) CreateConversation(ctx context.Context, req CreateConversationReq) (*Conversation, error) {
-	return &Conversation{ID: 1}, nil
-}
-
-func (m *mockCWClient) UpdateConversationStatus(ctx context.Context, convID int, status string) error {
-	return nil
-}
-
-func (m *mockCWClient) CreateMessage(ctx context.Context, convID int, req MessageReq) (*Message, error) {
-	m.messages = append(m.messages, req)
-	m.lastMessageType = req.MessageType
-	return &Message{ID: 1, SourceID: "src-1"}, nil
-}
-
-func (m *mockCWClient) CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error) {
-	return &Message{ID: 1}, nil
-}
-
-func (m *mockCWClient) DeleteMessage(ctx context.Context, convID, msgID int) error {
-	return nil
-}
-
-func (m *mockCWClient) UpdateLastSeen(ctx context.Context, inboxIdentifier, sourceID string, convID int) error {
-	return nil
-}
-
-func (m *mockCWClient) ListInboxes(ctx context.Context) ([]Inbox, error) {
-	return []Inbox{{ID: 1, Name: "test-inbox"}}, nil
-}
-
-func (m *mockCWClient) CreateInbox(ctx context.Context, name, webhookURL string) (*Inbox, error) {
-	return &Inbox{ID: 1}, nil
-}
-
-func (m *mockCWClient) UpdateInboxWebhook(ctx context.Context, inboxID int, webhookURL string) error {
-	return nil
-}
-
-type mockRepo struct {
-	cfg      *ChatwootConfig
-	notFound bool
-}
-
-func (m *mockRepo) Upsert(ctx context.Context, cfg *ChatwootConfig) error {
-	m.cfg = cfg
-	return nil
-}
-
-func (m *mockRepo) FindBySessionID(ctx context.Context, sessionID string) (*ChatwootConfig, error) {
-	if m.notFound {
-		return nil, fmt.Errorf("not found")
-	}
-	if m.cfg == nil {
-		return &ChatwootConfig{SessionID: sessionID, Enabled: true, InboxID: 1}, nil
-	}
-	return m.cfg, nil
-}
-
-func (m *mockRepo) Delete(ctx context.Context, sessionID string) error {
-	return nil
-}
-
-type mockMsgRepo struct{}
-
-func (m *mockMsgRepo) Save(ctx context.Context, msg *model.Message) error {
-	return nil
-}
-
-func (m *mockMsgRepo) FindByChat(ctx context.Context, sessionID, chatJID string, limit, offset int) ([]model.Message, error) {
-	return []model.Message{}, nil
-}
-
-func (m *mockMsgRepo) FindByID(ctx context.Context, sessionID, msgID string) (*model.Message, error) {
-	return &model.Message{ID: msgID, SessionID: sessionID}, nil
-}
-
-func (m *mockMsgRepo) FindByCWMessageID(ctx context.Context, sessionID string, cwMsgID int) (*model.Message, error) {
-	return &model.Message{ID: "test-msg", SessionID: sessionID}, nil
-}
-
-func (m *mockMsgRepo) UpdateChatwootRef(ctx context.Context, sessionID, msgID string, cwMsgID, cwConvID int, cwSourceID string) error {
-	return nil
-}
-
 func TestOnEvent_IncomingMessage(t *testing.T) {
 	mockClient := &mockCWClient{
 		contacts:      []Contact{{ID: 1, Name: "Test Contact"}},
@@ -448,8 +339,9 @@ func TestOnEvent_IncomingMessage(t *testing.T) {
 		repo:       &mockRepo{cfg: &ChatwootConfig{SessionID: "test-session", Enabled: true, InboxID: 1}},
 		msgRepo:    &mockMsgRepo{},
 		clientFn:   func(cfg *ChatwootConfig) CWClient { return mockClient },
-		convCache:  sync.Map{},
+		cache:      newMemoryCache(context.Background()),
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		cb:         newCircuitBreakerManager(),
 	}
 
 	svc.OnEvent("test-session", "Message", payload)
@@ -496,8 +388,9 @@ func TestOnEvent_OutgoingMessage(t *testing.T) {
 		repo:       &mockRepo{cfg: &ChatwootConfig{SessionID: "test-session", Enabled: true, InboxID: 1}},
 		msgRepo:    &mockMsgRepo{},
 		clientFn:   func(cfg *ChatwootConfig) CWClient { return mockClient },
-		convCache:  sync.Map{},
+		cache:      newMemoryCache(context.Background()),
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		cb:         newCircuitBreakerManager(),
 	}
 
 	svc.OnEvent("test-session", "Message", payload)
