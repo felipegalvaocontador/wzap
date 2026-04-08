@@ -23,10 +23,10 @@ import (
 var sessionNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type SessionService struct {
-	repo        *repo.SessionRepository
-	webhookRepo *repo.WebhookRepository
-	engine      *wa.Manager
-	provider    *cloudWA.Client
+	repo            *repo.SessionRepository
+	webhookRepo     *repo.WebhookRepository
+	engine          *wa.Manager
+	provider        *cloudWA.Client
 	runtimeResolver *SessionRuntimeResolver
 }
 
@@ -35,10 +35,10 @@ func NewSessionService(r *repo.SessionRepository, webhookRepo *repo.WebhookRepos
 		runtimeResolver = NewSessionRuntimeResolver(r, engine, provider)
 	}
 	return &SessionService{
-		repo:        r,
-		webhookRepo: webhookRepo,
-		engine:      engine,
-		provider:    provider,
+		repo:            r,
+		webhookRepo:     webhookRepo,
+		engine:          engine,
+		provider:        provider,
 		runtimeResolver: runtimeResolver,
 	}
 }
@@ -245,8 +245,8 @@ func (s *SessionService) Status(ctx context.Context, id string) (*dto.SessionSta
 		loggedIn = session.JID != ""
 		connected = session.Connected == 1
 		if client, cErr := runtime.Client(); cErr == nil {
-				connected = client.IsConnected()
-				loggedIn = client.Store.ID != nil
+			connected = client.IsConnected()
+			loggedIn = client.Store.ID != nil
 		}
 	}
 

@@ -92,8 +92,8 @@ type MessageContext struct {
 }
 
 type TextMessage struct {
-	Body         string `json:"body"`
-	PreviewURL   *bool  `json:"preview_url,omitempty"`
+	Body       string `json:"body"`
+	PreviewURL *bool  `json:"preview_url,omitempty"`
 }
 
 type MediaIDOrURL struct {
@@ -111,13 +111,13 @@ type LocationMessage struct {
 }
 
 type ContactAddress struct {
-	Street       string `json:"street,omitempty"`
-	City         string `json:"city,omitempty"`
-	State        string `json:"state,omitempty"`
-	Zip          string `json:"zip,omitempty"`
-	Country      string `json:"country,omitempty"`
-	CountryCode  string `json:"country_code,omitempty"`
-	Type         string `json:"type,omitempty"`
+	Street      string `json:"street,omitempty"`
+	City        string `json:"city,omitempty"`
+	State       string `json:"state,omitempty"`
+	Zip         string `json:"zip,omitempty"`
+	Country     string `json:"country,omitempty"`
+	CountryCode string `json:"country_code,omitempty"`
+	Type        string `json:"type,omitempty"`
 }
 
 type ContactName struct {
@@ -180,22 +180,22 @@ type TemplateLanguage struct {
 }
 
 type TemplateComponent struct {
-	Type       string               `json:"type"`
-	SubType    string               `json:"sub_type,omitempty"`
-	Index      int                  `json:"index,omitempty"`
-	Parameters []TemplateParameter  `json:"parameters,omitempty"`
+	Type       string              `json:"type"`
+	SubType    string              `json:"sub_type,omitempty"`
+	Index      int                 `json:"index,omitempty"`
+	Parameters []TemplateParameter `json:"parameters,omitempty"`
 }
 
 type TemplateParameter struct {
-	Type       string                    `json:"type"`
-	Text       string                    `json:"text,omitempty"`
-	Currency   *TemplateCurrency         `json:"currency,omitempty"`
-	DateTime   *TemplateDateTime         `json:"date_time,omitempty"`
-	Image      *TemplateMediaParam       `json:"image,omitempty"`
-	Video      *TemplateMediaParam       `json:"video,omitempty"`
-	Document   *TemplateMediaParam       `json:"document,omitempty"`
-	Location   *TemplateLocationParam    `json:"location,omitempty"`
-	Payload    string                    `json:"payload,omitempty"`
+	Type     string                 `json:"type"`
+	Text     string                 `json:"text,omitempty"`
+	Currency *TemplateCurrency      `json:"currency,omitempty"`
+	DateTime *TemplateDateTime      `json:"date_time,omitempty"`
+	Image    *TemplateMediaParam    `json:"image,omitempty"`
+	Video    *TemplateMediaParam    `json:"video,omitempty"`
+	Document *TemplateMediaParam    `json:"document,omitempty"`
+	Location *TemplateLocationParam `json:"location,omitempty"`
+	Payload  string                 `json:"payload,omitempty"`
 }
 
 type TemplateCurrency struct {
@@ -223,21 +223,21 @@ type TemplateLocationParam struct {
 // ── Interactive Types ─────────────────────────────────────────────────────────
 
 type Interactive struct {
-	Type   string              `json:"type"`
-	Action *InteractiveAction  `json:"action,omitempty"`
-	Body   *InteractiveBody    `json:"body,omitempty"`
-	Footer *InteractiveFooter  `json:"footer,omitempty"`
-	Header *InteractiveHeader  `json:"header,omitempty"`
+	Type   string             `json:"type"`
+	Action *InteractiveAction `json:"action,omitempty"`
+	Body   *InteractiveBody   `json:"body,omitempty"`
+	Footer *InteractiveFooter `json:"footer,omitempty"`
+	Header *InteractiveHeader `json:"header,omitempty"`
 }
 
 type InteractiveAction struct {
-	Button             string                    `json:"button,omitempty"`
-	Buttons            []InteractiveButton       `json:"buttons,omitempty"`
-	CatalogID          string                    `json:"catalog_id,omitempty"`
-	ProductRetailerID  string                    `json:"product_retailer_id,omitempty"`
-	Sections           []InteractiveSection      `json:"sections,omitempty"`
-	Name               string                    `json:"name,omitempty"`
-	Parameters         *InteractiveActionParam   `json:"parameters,omitempty"`
+	Button            string                  `json:"button,omitempty"`
+	Buttons           []InteractiveButton     `json:"buttons,omitempty"`
+	CatalogID         string                  `json:"catalog_id,omitempty"`
+	ProductRetailerID string                  `json:"product_retailer_id,omitempty"`
+	Sections          []InteractiveSection    `json:"sections,omitempty"`
+	Name              string                  `json:"name,omitempty"`
+	Parameters        *InteractiveActionParam `json:"parameters,omitempty"`
 }
 
 type InteractiveButton struct {
@@ -252,9 +252,9 @@ type InteractiveReplyButton struct {
 }
 
 type InteractiveSection struct {
-	Title      string                `json:"title,omitempty"`
+	Title        string                   `json:"title,omitempty"`
 	ProductItems []InteractiveProductItem `json:"product_items,omitempty"`
-	Rows       []InteractiveSectionRow `json:"rows,omitempty"`
+	Rows         []InteractiveSectionRow  `json:"rows,omitempty"`
 }
 
 type InteractiveProductItem struct {
@@ -276,8 +276,8 @@ type InteractiveFooter struct {
 }
 
 type InteractiveHeader struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
 	Image    *MediaIDOrURL `json:"image,omitempty"`
 	Document *MediaIDOrURL `json:"document,omitempty"`
 	Video    *MediaIDOrURL `json:"video,omitempty"`
@@ -343,8 +343,8 @@ type WebhookNotification struct {
 }
 
 type Entry struct {
-	ID    string   `json:"id"`
-	Time  int64    `json:"time"`
+	ID      string   `json:"id"`
+	Time    int64    `json:"time"`
 	Changes []Change `json:"changes"`
 }
 
@@ -354,11 +354,11 @@ type Change struct {
 }
 
 type Value struct {
-	MessagingProduct string     `json:"messaging_product"`
-	Metadata         *Metadata  `json:"metadata"`
-	Contacts         []Contact  `json:"contacts"`
-	Messages         []Message  `json:"messages"`
-	Statuses         []Status   `json:"statuses"`
+	MessagingProduct string      `json:"messaging_product"`
+	Metadata         *Metadata   `json:"metadata"`
+	Contacts         []Contact   `json:"contacts"`
+	Messages         []Message   `json:"messages"`
+	Statuses         []Status    `json:"statuses"`
 	Errors           []ErrorItem `json:"errors"`
 }
 
@@ -368,26 +368,26 @@ type Metadata struct {
 }
 
 type Message struct {
-	From        string          `json:"from"`
-	ID          string          `json:"id"`
-	Timestamp   string          `json:"timestamp"`
-	Type        string          `json:"type"`
-	Context     *MessageContext `json:"context,omitempty"`
-	Text        *TextPayload    `json:"text,omitempty"`
-	Image       *MediaPayload   `json:"image,omitempty"`
-	Video       *MediaPayload   `json:"video,omitempty"`
-	Audio       *MediaPayload   `json:"audio,omitempty"`
-	Document    *MediaPayload   `json:"document,omitempty"`
-	Sticker     *StickerPayload `json:"sticker,omitempty"`
-	Location    *LocationPayload `json:"location,omitempty"`
-	Contacts    []Contact       `json:"contacts,omitempty"`
-	Reaction    *ReactionPayload `json:"reaction,omitempty"`
+	From        string              `json:"from"`
+	ID          string              `json:"id"`
+	Timestamp   string              `json:"timestamp"`
+	Type        string              `json:"type"`
+	Context     *MessageContext     `json:"context,omitempty"`
+	Text        *TextPayload        `json:"text,omitempty"`
+	Image       *MediaPayload       `json:"image,omitempty"`
+	Video       *MediaPayload       `json:"video,omitempty"`
+	Audio       *MediaPayload       `json:"audio,omitempty"`
+	Document    *MediaPayload       `json:"document,omitempty"`
+	Sticker     *StickerPayload     `json:"sticker,omitempty"`
+	Location    *LocationPayload    `json:"location,omitempty"`
+	Contacts    []Contact           `json:"contacts,omitempty"`
+	Reaction    *ReactionPayload    `json:"reaction,omitempty"`
 	Interactive *InteractivePayload `json:"interactive,omitempty"`
-	Button      *ButtonPayload `json:"button,omitempty"`
-	Order       *OrderPayload  `json:"order,omitempty"`
-	System      *SystemPayload `json:"system,omitempty"`
-	Referral    *ReferralPayload `json:"referral,omitempty"`
-	Errors      []ErrorItem    `json:"errors,omitempty"`
+	Button      *ButtonPayload      `json:"button,omitempty"`
+	Order       *OrderPayload       `json:"order,omitempty"`
+	System      *SystemPayload      `json:"system,omitempty"`
+	Referral    *ReferralPayload    `json:"referral,omitempty"`
+	Errors      []ErrorItem         `json:"errors,omitempty"`
 }
 
 type TextPayload struct {
@@ -426,10 +426,10 @@ type ReactionPayload struct {
 }
 
 type InteractivePayload struct {
-	Type     string `json:"type"`
+	Type        string                  `json:"type"`
 	ButtonReply *InteractiveButtonReply `json:"button_reply,omitempty"`
-	ListReply  *InteractiveListReply `json:"list_reply,omitempty"`
-	NFMReply   *InteractiveNFMReply `json:"nfm_reply,omitempty"`
+	ListReply   *InteractiveListReply   `json:"list_reply,omitempty"`
+	NFMReply    *InteractiveNFMReply    `json:"nfm_reply,omitempty"`
 }
 
 type InteractiveButtonReply struct {
@@ -444,9 +444,9 @@ type InteractiveListReply struct {
 }
 
 type InteractiveNFMReply struct {
-	Name              string `json:"name"`
-	ResponseJSON      string `json:"response_json"`
-	Body              string `json:"body,omitempty"`
+	Name         string `json:"name"`
+	ResponseJSON string `json:"response_json"`
+	Body         string `json:"body,omitempty"`
 }
 
 type ButtonPayload struct {
@@ -455,35 +455,35 @@ type ButtonPayload struct {
 }
 
 type OrderPayload struct {
-	CatalogID    string            `json:"catalog_id"`
+	CatalogID    string             `json:"catalog_id"`
 	ProductItems []OrderProductItem `json:"product_items"`
-	Text         string            `json:"text,omitempty"`
+	Text         string             `json:"text,omitempty"`
 }
 
 type OrderProductItem struct {
-	ProductRetailerID string  `json:"product_retailer_id"`
-	Quantity          string  `json:"quantity"`
-	ItemPrice         string  `json:"item_price"`
-	Currency          string  `json:"currency"`
+	ProductRetailerID string `json:"product_retailer_id"`
+	Quantity          string `json:"quantity"`
+	ItemPrice         string `json:"item_price"`
+	Currency          string `json:"currency"`
 }
 
 type SystemPayload struct {
-	Body    string `json:"body"`
-	Type    string `json:"type"`
-	WaID    string `json:"wa_id"`
+	Body string `json:"body"`
+	Type string `json:"type"`
+	WaID string `json:"wa_id"`
 }
 
 type ReferralPayload struct {
-	SourceURL     string `json:"source_url"`
-	SourceType    string `json:"source_type"`
-	SourceID      string `json:"source_id"`
-	Headline      string `json:"headline"`
-	Body          string `json:"body"`
-	MediaURL      string `json:"media_url,omitempty"`
-	ImageURL      string `json:"image_url,omitempty"`
-	VideoURL      string `json:"video_url,omitempty"`
-	ThumbnailURL  string `json:"thumbnail_url,omitempty"`
-	CtwaCLID      string `json:"ctwa_clid,omitempty"`
+	SourceURL    string `json:"source_url"`
+	SourceType   string `json:"source_type"`
+	SourceID     string `json:"source_id"`
+	Headline     string `json:"headline"`
+	Body         string `json:"body"`
+	MediaURL     string `json:"media_url,omitempty"`
+	ImageURL     string `json:"image_url,omitempty"`
+	VideoURL     string `json:"video_url,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+	CtwaCLID     string `json:"ctwa_clid,omitempty"`
 }
 
 type Status struct {
@@ -497,9 +497,9 @@ type Status struct {
 }
 
 type Conversation struct {
-	ID                string `json:"id"`
-	ExpirationTimestamp string `json:"expiration_timestamp"`
-	Origin            *Origin `json:"origin,omitempty"`
+	ID                  string  `json:"id"`
+	ExpirationTimestamp string  `json:"expiration_timestamp"`
+	Origin              *Origin `json:"origin,omitempty"`
 }
 
 type Origin struct {
@@ -522,22 +522,22 @@ type ErrorItem struct {
 // ── Template Management Types ─────────────────────────────────────────────────
 
 type TemplateNode struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Category     string `json:"category"`
-	Language     string `json:"language"`
-	Status       string `json:"status"`
-	Components   []TemplateComponentNode `json:"components"`
-	QualityScore *TemplateQualityScore `json:"quality_score,omitempty"`
-	RejectedReason string `json:"rejected_reason,omitempty"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Category       string                  `json:"category"`
+	Language       string                  `json:"language"`
+	Status         string                  `json:"status"`
+	Components     []TemplateComponentNode `json:"components"`
+	QualityScore   *TemplateQualityScore   `json:"quality_score,omitempty"`
+	RejectedReason string                  `json:"rejected_reason,omitempty"`
 }
 
 type TemplateComponentNode struct {
-	Type     string `json:"type"`
-	Format   string `json:"format,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Buttons  []TemplateButtonNode `json:"buttons,omitempty"`
-	Example  *TemplateExample `json:"example,omitempty"`
+	Type    string               `json:"type"`
+	Format  string               `json:"format,omitempty"`
+	Text    string               `json:"text,omitempty"`
+	Buttons []TemplateButtonNode `json:"buttons,omitempty"`
+	Example *TemplateExample     `json:"example,omitempty"`
 }
 
 type TemplateButtonNode struct {
@@ -549,15 +549,15 @@ type TemplateButtonNode struct {
 }
 
 type TemplateExample struct {
-	HeaderText   []string `json:"header_text,omitempty"`
-	BodyText     [][]string `json:"body_text,omitempty"`
-	FooterText   []string `json:"footer_text,omitempty"`
-	Buttons      [][]string `json:"buttons,omitempty"`
+	HeaderText []string   `json:"header_text,omitempty"`
+	BodyText   [][]string `json:"body_text,omitempty"`
+	FooterText []string   `json:"footer_text,omitempty"`
+	Buttons    [][]string `json:"buttons,omitempty"`
 }
 
 type TemplateQualityScore struct {
-	Date   string   `json:"date"`
-	Score  string   `json:"score"`
+	Date    string   `json:"date"`
+	Score   string   `json:"score"`
 	Reasons []string `json:"reasons,omitempty"`
 }
 
@@ -567,16 +567,16 @@ type TemplateListResponse struct {
 }
 
 type CreateTemplateRequest struct {
-	Name       string                        `json:"name"`
-	Category   string                        `json:"category"`
-	Language   string                        `json:"language"`
-	Components []CreateTemplateComponent     `json:"components"`
+	Name       string                    `json:"name"`
+	Category   string                    `json:"category"`
+	Language   string                    `json:"language"`
+	Components []CreateTemplateComponent `json:"components"`
 }
 
 type CreateTemplateComponent struct {
-	Type    string `json:"type"`
-	Format  string `json:"format,omitempty"`
-	Text    string `json:"text,omitempty"`
+	Type    string                 `json:"type"`
+	Format  string                 `json:"format,omitempty"`
+	Text    string                 `json:"text,omitempty"`
 	Buttons []CreateTemplateButton `json:"buttons,omitempty"`
 	Example *CreateTemplateExample `json:"example,omitempty"`
 }
@@ -590,9 +590,9 @@ type CreateTemplateButton struct {
 }
 
 type CreateTemplateExample struct {
-	HeaderText []string `json:"header_text,omitempty"`
+	HeaderText []string   `json:"header_text,omitempty"`
 	BodyText   [][]string `json:"body_text,omitempty"`
-	FooterText []string `json:"footer_text,omitempty"`
+	FooterText []string   `json:"footer_text,omitempty"`
 	Buttons    [][]string `json:"buttons,omitempty"`
 }
 
@@ -603,8 +603,8 @@ type CreateTemplateResponse struct {
 }
 
 type UpdateTemplateRequest struct {
-	Category string                        `json:"category,omitempty"`
-	Components []CreateTemplateComponent   `json:"components,omitempty"`
+	Category   string                    `json:"category,omitempty"`
+	Components []CreateTemplateComponent `json:"components,omitempty"`
 }
 
 // ── Phone Number Types ────────────────────────────────────────────────────────
@@ -626,9 +626,9 @@ type PhoneNumberListResponse struct {
 }
 
 type Paging struct {
-	Cursors *Cursors `json:"cursors,omitempty"`
-	Next    string   `json:"next,omitempty"`
-	Previous string  `json:"previous,omitempty"`
+	Cursors  *Cursors `json:"cursors,omitempty"`
+	Next     string   `json:"next,omitempty"`
+	Previous string   `json:"previous,omitempty"`
 }
 
 type Cursors struct {

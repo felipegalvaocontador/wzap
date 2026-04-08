@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"encoding/base64"
 	"context"
+	"encoding/base64"
 
 	"wzap/internal/dto"
 	"wzap/internal/integrations/chatwoot"

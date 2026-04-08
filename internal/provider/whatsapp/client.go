@@ -71,7 +71,6 @@ func (c *Client) doRequest(ctx context.Context, sessionID, method, endpoint stri
 	return &apiResp, nil
 }
 
-
 func (c *Client) doRequestDownload(ctx context.Context, downloadURL string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {

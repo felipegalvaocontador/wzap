@@ -13,21 +13,21 @@ import (
 )
 
 type stubLifecycleManager struct {
-	connectClient    *whatsmeow.Client
-	connectQR        <-chan whatsmeow.QRChannelItem
-	connectErr       error
-	connectCalls     int
-	disconnectErr    error
-	disconnectCalls  int
-	logoutErr        error
-	logoutCalls      int
-	reconnectErr     error
-	reconnectCalls   int
-	qrCode           string
-	qrErr            error
-	pairCode         string
-	pairErr          error
-	pairCalls        int
+	connectClient   *whatsmeow.Client
+	connectQR       <-chan whatsmeow.QRChannelItem
+	connectErr      error
+	connectCalls    int
+	disconnectErr   error
+	disconnectCalls int
+	logoutErr       error
+	logoutCalls     int
+	reconnectErr    error
+	reconnectCalls  int
+	qrCode          string
+	qrErr           error
+	pairCode        string
+	pairErr         error
+	pairCalls       int
 }
 
 func (m *stubLifecycleManager) Connect(ctx context.Context, sessionID string) (*whatsmeow.Client, <-chan whatsmeow.QRChannelItem, error) {

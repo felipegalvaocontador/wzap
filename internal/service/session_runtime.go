@@ -25,9 +25,9 @@ type SessionRuntimeResolver struct {
 }
 
 type SessionRuntime struct {
-	session    *model.Session
-	engine     *wa.Manager
-	provider   *cloudWA.Client
+	session     *model.Session
+	engine      *wa.Manager
+	provider    *cloudWA.Client
 	cloudConfig *cloudWA.Config
 }
 

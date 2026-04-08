@@ -6,23 +6,23 @@ import (
 )
 
 type messagePayload struct {
-	MessagingProduct string `json:"messaging_product"`
-	RecipientType    string `json:"recipient_type,omitempty"`
-	To               string `json:"to"`
-	Type             string `json:"type"`
+	MessagingProduct string          `json:"messaging_product"`
+	RecipientType    string          `json:"recipient_type,omitempty"`
+	To               string          `json:"to"`
+	Type             string          `json:"type"`
 	Context          *MessageContext `json:"context,omitempty"`
 
-	Text       *TextMessage       `json:"text,omitempty"`
-	Image      *MediaIDOrURL      `json:"image,omitempty"`
-	Video      *MediaIDOrURL      `json:"video,omitempty"`
-	Audio      *MediaIDOrURL      `json:"audio,omitempty"`
-	Document   *MediaIDOrURL      `json:"document,omitempty"`
-	Sticker    *MediaIDOrURL      `json:"sticker,omitempty"`
-	Location   *LocationMessage   `json:"location,omitempty"`
-	Contacts   []Contact          `json:"contacts,omitempty"`
-	Reaction   *ReactionMessage   `json:"reaction,omitempty"`
-	Template   *Template          `json:"template,omitempty"`
-	Interactive *Interactive      `json:"interactive,omitempty"`
+	Text            *TextMessage     `json:"text,omitempty"`
+	Image           *MediaIDOrURL    `json:"image,omitempty"`
+	Video           *MediaIDOrURL    `json:"video,omitempty"`
+	Audio           *MediaIDOrURL    `json:"audio,omitempty"`
+	Document        *MediaIDOrURL    `json:"document,omitempty"`
+	Sticker         *MediaIDOrURL    `json:"sticker,omitempty"`
+	Location        *LocationMessage `json:"location,omitempty"`
+	Contacts        []Contact        `json:"contacts,omitempty"`
+	Reaction        *ReactionMessage `json:"reaction,omitempty"`
+	Template        *Template        `json:"template,omitempty"`
+	Interactive     *Interactive     `json:"interactive,omitempty"`
 	TypingIndicator *TypingIndicator `json:"typing_indicator,omitempty"`
 }
 
