@@ -33,6 +33,7 @@ type Config struct {
 	HTTPTimeout time.Duration
 
 	WSAuthMode string
+	WebDir     string
 }
 
 func Load() *Config {
@@ -63,6 +64,7 @@ func Load() *Config {
 		HTTPTimeout: getEnvAsDuration("HTTP_TIMEOUT", 30*time.Second),
 
 		WSAuthMode: getEnv("WS_AUTH_MODE", "token"),
+		WebDir:     getEnv("WEB_DIR", ""),
 	}
 }
 

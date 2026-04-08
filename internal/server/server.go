@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -95,4 +98,42 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		logger.Info().Msg("API server stopped gracefully")
 		return err
 	}
+}
+
+func (s *Server) mountSPA(prefix string, dir string) {
+	prefix = "/" + strings.Trim(prefix, "/")
+	indexPath := filepath.Join(dir, "index.html")
+
+	if _, err := os.Stat(indexPath); err != nil {
+		logger.Warn().Str("dir", dir).Msg("Web directory does not contain index.html, skipping SPA mount")
+		return
+	}
+
+	logger.Info().Str("prefix", prefix).Str("dir", dir).Msg("Mounting SPA static files")
+
+	s.App.Get(prefix, func(c *fiber.Ctx) error {
+		return c.Redirect(prefix+"/", fiber.StatusMovedPermanently)
+	})
+
+	s.App.Use(prefix+"/", func(c *fiber.Ctx) error {
+		urlPath := c.Path()
+
+		relPath := strings.TrimPrefix(urlPath, prefix)
+		relPath = strings.TrimPrefix(relPath, "/")
+		if relPath == "" {
+			relPath = "index.html"
+		}
+
+		filePath := filepath.Join(dir, filepath.Clean(relPath))
+
+		if !strings.HasPrefix(filePath, filepath.Clean(dir)) {
+			return c.Status(fiber.StatusForbidden).SendString("forbidden")
+		}
+
+		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+			return c.SendFile(filePath)
+		}
+
+		return c.SendFile(indexPath)
+	})
 }

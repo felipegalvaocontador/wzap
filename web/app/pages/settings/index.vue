@@ -65,7 +65,7 @@ async function testConnection() {
     <UPageCard variant="subtle">
       <UFormField
         label="API Base URL"
-        description="All requests are proxied through the Nuxt server to the Go API."
+        description="All requests are sent directly to the wzap API."
         class="flex max-sm:flex-col justify-between items-start gap-4"
       >
         <UInput :model-value="apiOrigin" disabled class="w-full max-w-xs" />
