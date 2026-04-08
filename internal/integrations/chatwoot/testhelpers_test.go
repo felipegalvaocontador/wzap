@@ -98,6 +98,14 @@ func (m *mockCWClient) UpdateInboxWebhook(_ context.Context, _ int, _ string) er
 	return nil
 }
 
+func (m *mockCWClient) GetConversation(_ context.Context, convID int) (*Conversation, error) {
+	return &Conversation{ID: convID}, nil
+}
+
+func (m *mockCWClient) MergeContacts(_ context.Context, _, _ int) error {
+	return nil
+}
+
 func (m *mockCWClient) FilterContactsCallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -184,6 +192,10 @@ func (m *mockMsgRepo) FindByTimestampWindow(_ context.Context, _, _ string, _ in
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (m *mockMsgRepo) FindLastReceivedByChat(_ context.Context, _, _ string) (*model.Message, error) {
+	return nil, fmt.Errorf("not found")
+}
+
 type mockMsgRepoWithDuplicates struct {
 	existingSourceIDs map[string]bool
 }
@@ -234,6 +246,10 @@ func (m *mockMsgRepoWithDuplicates) FindByBodyAndChatAny(_ context.Context, _, _
 
 func (m *mockMsgRepoWithDuplicates) FindByTimestampWindow(_ context.Context, _, _ string, _ int64, _ int64) (*model.Message, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockMsgRepoWithDuplicates) FindLastReceivedByChat(_ context.Context, _, _ string) (*model.Message, error) {
+	return nil, fmt.Errorf("not found")
 }
 
 type mockMsgRepoFixed struct {

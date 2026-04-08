@@ -150,9 +150,13 @@ func (s *Service) handleQR(ctx context.Context, cfg *ChatwootConfig, payload []b
 
 func (s *Service) handleContact(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
 	var data struct {
-		JID       string `json:"JID"`
-		FirstName string `json:"FirstName"`
-		FullName  string `json:"FullName"`
+		JID    string `json:"JID"`
+		Action struct {
+			FullName  *string `json:"fullName"`
+			FirstName *string `json:"firstName"`
+			PnJID     *string `json:"pnJID"`
+			LidJID    *string `json:"lidJID"`
+		} `json:"Action"`
 	}
 	if err := parseEnvelopeData(payload, &data); err != nil {
 		return
@@ -162,10 +166,25 @@ func (s *Service) handleContact(ctx context.Context, cfg *ChatwootConfig, payloa
 		return
 	}
 
-	phone := extractPhone(data.JID)
-	name := data.FullName
-	if name == "" {
-		name = data.FirstName
+	jid := data.JID
+	if strings.HasSuffix(jid, "@lid") {
+		if data.Action.PnJID != nil && *data.Action.PnJID != "" {
+			jid = *data.Action.PnJID
+			if !strings.Contains(jid, "@") {
+				jid = jid + "@s.whatsapp.net"
+			}
+		} else {
+			jid = s.resolveJID(ctx, cfg.SessionID, jid)
+		}
+	}
+
+	phone := extractPhone(jid)
+	name := ""
+	if data.Action.FullName != nil {
+		name = *data.Action.FullName
+	}
+	if name == "" && data.Action.FirstName != nil {
+		name = *data.Action.FirstName
 	}
 	if name == "" {
 		return
@@ -182,18 +201,28 @@ func (s *Service) handleContact(ctx context.Context, cfg *ChatwootConfig, payloa
 
 func (s *Service) handlePushName(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
 	var data struct {
-		JID      string `json:"JID"`
-		PushName string `json:"PushName"`
+		JID         string `json:"JID"`
+		JIDAlt      string `json:"JIDAlt"`
+		NewPushName string `json:"NewPushName"`
 	}
 	if err := parseEnvelopeData(payload, &data); err != nil {
 		return
 	}
 
-	if data.JID == "" || data.PushName == "" {
+	if data.JID == "" || data.NewPushName == "" {
 		return
 	}
 
-	phone := extractPhone(data.JID)
+	jid := data.JID
+	if strings.HasSuffix(jid, "@lid") {
+		if data.JIDAlt != "" {
+			jid = data.JIDAlt
+		} else {
+			jid = s.resolveJID(ctx, cfg.SessionID, jid)
+		}
+	}
+
+	phone := extractPhone(jid)
 
 	client := s.clientFn(cfg)
 	contacts, _ := client.FilterContacts(ctx, phone)
@@ -201,25 +230,40 @@ func (s *Service) handlePushName(ctx context.Context, cfg *ChatwootConfig, paylo
 		return
 	}
 
-	_ = client.UpdateContact(ctx, contacts[0].ID, UpdateContactReq{Name: data.PushName})
+	_ = client.UpdateContact(ctx, contacts[0].ID, UpdateContactReq{Name: data.NewPushName})
 }
 
 func (s *Service) handlePicture(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
 	var data struct {
 		JID       string `json:"JID"`
-		PictureID string `json:"ID"`
-		URL       string `json:"URL"`
-		IsGroup   bool   `json:"IsGroup"`
+		PictureID string `json:"PictureID"`
+		Remove    bool   `json:"Remove"`
 	}
 	if err := parseEnvelopeData(payload, &data); err != nil {
 		return
 	}
 
-	if data.JID == "" || data.URL == "" {
+	if data.JID == "" || data.Remove {
 		return
 	}
 
-	phone := extractPhone(data.JID)
+	jid := data.JID
+	if strings.HasSuffix(jid, "@lid") {
+		jid = s.resolveJID(ctx, cfg.SessionID, jid)
+	}
+
+	phone := extractPhone(jid)
+
+	var avatarURL string
+	if s.profilePicGetter != nil {
+		url, err := s.profilePicGetter.GetProfilePicture(ctx, cfg.SessionID, data.JID)
+		if err != nil || url == "" {
+			return
+		}
+		avatarURL = url
+	} else {
+		return
+	}
 
 	client := s.clientFn(cfg)
 	contacts, _ := client.FilterContacts(ctx, phone)
@@ -228,94 +272,133 @@ func (s *Service) handlePicture(ctx context.Context, cfg *ChatwootConfig, payloa
 	}
 
 	_ = client.UpdateContact(ctx, contacts[0].ID, UpdateContactReq{
-		AdditionalAttributes: map[string]any{"avatar_url": data.URL},
+		AvatarURL: avatarURL,
 	})
 }
 
-func (s *Service) handleGroupInfo(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
+func (s *Service) handleGroupInfo(ctx context.Context, cfg *ChatwootConfig, payload []byte) error {
 	var data struct {
-		JID       string `json:"JID"`
-		Timestamp int64  `json:"Timestamp"`
-		Updates   []struct {
-			Type       string `json:"Type"`
-			JID        string `json:"JID"`
-			Participant string `json:"Participant"`
-			Name       string `json:"Name"`
-			Description string `json:"Description"`
-			Announce    bool   `json:"Announce"`
-			Ephemeral   int    `json:"Ephemeral"`
-			NewInviteLink string `json:"NewInviteLink"`
-		} `json:"Updates"`
-		Sender struct {
-			User   string `json:"User"`
-			Server string `json:"Server"`
-		} `json:"Sender"`
+		JID      string  `json:"JID"`
+		Sender   *string `json:"Sender"`
+		SenderPN *string `json:"SenderPN"`
+		Name     *struct {
+			Name string `json:"Name"`
+		} `json:"Name"`
+		Topic *struct {
+			Topic        string `json:"Topic"`
+			TopicDeleted bool   `json:"TopicDeleted"`
+		} `json:"Topic"`
+		Announce *struct {
+			IsAnnounce bool `json:"IsAnnounce"`
+		} `json:"Announce"`
+		Ephemeral *struct {
+			IsEphemeral       bool   `json:"IsEphemeral"`
+			DisappearingTimer uint32 `json:"DisappearingTimer"`
+		} `json:"Ephemeral"`
+		NewInviteLink *string  `json:"NewInviteLink"`
+		Join          []string `json:"Join"`
+		Leave         []string `json:"Leave"`
+		Promote       []string `json:"Promote"`
+		Demote        []string `json:"Demote"`
 	}
 	if err := parseEnvelopeData(payload, &data); err != nil {
-		return
+		return nil
 	}
 	if data.JID == "" {
-		return
+		return nil
 	}
 
 	groupJID := data.JID
 	convID, err := s.findOrCreateConversation(ctx, cfg, groupJID, "")
 	if err != nil {
 		logger.Warn().Err(err).Str("group", groupJID).Msg("[CW] failed to get group conversation for event")
-		return
+		return err
 	}
 
 	client := s.clientFn(cfg)
-	sender := data.Sender.User
 
-	for _, upd := range data.Updates {
-		var notif string
-		participant := upd.Participant
-		if participant == "" {
-			participant = upd.JID
+	senderPhone := ""
+	if data.SenderPN != nil && *data.SenderPN != "" {
+		senderPhone = extractPhone(*data.SenderPN)
+	} else if data.Sender != nil && *data.Sender != "" {
+		senderJID := *data.Sender
+		if strings.HasSuffix(senderJID, "@lid") {
+			senderJID = s.resolveJID(ctx, cfg.SessionID, senderJID)
 		}
-		participantPhone := extractPhone(participant)
+		senderPhone = extractPhone(senderJID)
+	}
 
-		switch upd.Type {
-		case "add":
-			notif = fmt.Sprintf("➕ %s entrou no grupo", participantPhone)
-		case "remove":
-			notif = fmt.Sprintf("➖ %s foi removido do grupo por %s", participantPhone, sender)
-		case "leave":
-			notif = fmt.Sprintf("🚪 %s saiu do grupo", participantPhone)
-		case "promote":
-			notif = fmt.Sprintf("⬆️ %s foi promovido a admin por %s", participantPhone, sender)
-		case "demote":
-			notif = fmt.Sprintf("⬇️ %s foi rebaixado de admin por %s", participantPhone, sender)
-		case "subject":
-			notif = fmt.Sprintf("📝 Nome do grupo alterado para: %s", upd.Name)
-		case "description":
-			notif = fmt.Sprintf("📋 Descrição do grupo atualizada: %s", upd.Description)
-		case "invite":
-			if upd.NewInviteLink != "" {
-				notif = fmt.Sprintf("🔗 Link de convite do grupo: %s", upd.NewInviteLink)
-			}
-		case "announce":
-			if upd.Announce {
-				notif = "🔒 Grupo restrito a admins"
-			} else {
-				notif = "🔓 Grupo aberto para todos enviarem mensagens"
-			}
-		case "ephemeral":
-			if upd.Ephemeral > 0 {
-				notif = fmt.Sprintf("⏳ Mensagens temporárias ativadas (%d segundos)", upd.Ephemeral)
-			} else {
-				notif = "⏳ Mensagens temporárias desativadas"
-			}
+	var notifications []string
+
+	for _, jid := range data.Join {
+		pJID := jid
+		if strings.HasSuffix(pJID, "@lid") {
+			pJID = s.resolveJID(ctx, cfg.SessionID, pJID)
 		}
-
-		if notif != "" && !strings.HasSuffix(groupJID, "@s.whatsapp.net") {
-			_, _ = client.CreateMessage(ctx, convID, MessageReq{
-				Content:     notif,
-				MessageType: "activity",
-			})
+		notifications = append(notifications, fmt.Sprintf("➕ %s entrou no grupo", extractPhone(pJID)))
+	}
+	for _, jid := range data.Leave {
+		pJID := jid
+		if strings.HasSuffix(pJID, "@lid") {
+			pJID = s.resolveJID(ctx, cfg.SessionID, pJID)
+		}
+		phone := extractPhone(pJID)
+		if senderPhone != "" && senderPhone != phone {
+			notifications = append(notifications, fmt.Sprintf("➖ %s foi removido do grupo por %s", phone, senderPhone))
+		} else {
+			notifications = append(notifications, fmt.Sprintf("🚪 %s saiu do grupo", phone))
 		}
 	}
+	for _, jid := range data.Promote {
+		pJID := jid
+		if strings.HasSuffix(pJID, "@lid") {
+			pJID = s.resolveJID(ctx, cfg.SessionID, pJID)
+		}
+		notifications = append(notifications, fmt.Sprintf("⬆️ %s foi promovido a admin por %s", extractPhone(pJID), senderPhone))
+	}
+	for _, jid := range data.Demote {
+		pJID := jid
+		if strings.HasSuffix(pJID, "@lid") {
+			pJID = s.resolveJID(ctx, cfg.SessionID, pJID)
+		}
+		notifications = append(notifications, fmt.Sprintf("⬇️ %s foi rebaixado de admin por %s", extractPhone(pJID), senderPhone))
+	}
+
+	if data.Name != nil && data.Name.Name != "" {
+		notifications = append(notifications, fmt.Sprintf("📝 Nome do grupo alterado para: %s", data.Name.Name))
+	}
+	if data.Topic != nil {
+		if data.Topic.TopicDeleted {
+			notifications = append(notifications, "📋 Descrição do grupo removida")
+		} else if data.Topic.Topic != "" {
+			notifications = append(notifications, fmt.Sprintf("📋 Descrição do grupo atualizada: %s", data.Topic.Topic))
+		}
+	}
+	if data.NewInviteLink != nil && *data.NewInviteLink != "" {
+		notifications = append(notifications, fmt.Sprintf("🔗 Link de convite do grupo: %s", *data.NewInviteLink))
+	}
+	if data.Announce != nil {
+		if data.Announce.IsAnnounce {
+			notifications = append(notifications, "🔒 Grupo restrito a admins")
+		} else {
+			notifications = append(notifications, "🔓 Grupo aberto para todos enviarem mensagens")
+		}
+	}
+	if data.Ephemeral != nil {
+		if data.Ephemeral.IsEphemeral {
+			notifications = append(notifications, fmt.Sprintf("⏳ Mensagens temporárias ativadas (%d segundos)", data.Ephemeral.DisappearingTimer))
+		} else {
+			notifications = append(notifications, "⏳ Mensagens temporárias desativadas")
+		}
+	}
+
+	for _, notif := range notifications {
+		_, _ = client.CreateMessage(ctx, convID, MessageReq{
+			Content:     notif,
+			MessageType: "activity",
+		})
+	}
+	return nil
 }
 
 func (s *Service) handleHistorySync(ctx context.Context, cfg *ChatwootConfig, payload []byte) {

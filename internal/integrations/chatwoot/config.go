@@ -27,6 +27,8 @@ type ChatwootConfig struct {
 	TimeoutTextSeconds  int       `json:"timeoutTextSeconds"`
 	TimeoutMediaSeconds int       `json:"timeoutMediaSeconds"`
 	TimeoutLargeSeconds int       `json:"timeoutLargeSeconds"`
+	MessageRead         bool      `json:"messageRead"`
+	DatabaseURI         string    `json:"databaseUri"`
 	RedisURL            string    `json:"redisUrl"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
@@ -46,6 +48,27 @@ func maskRedisURL(rawURL string) string {
 	}
 	if _, hasPassword := parsed.User.Password(); !hasPassword {
 		return rawURL
+	}
+
+	parsed.User = nil
+	masked := parsed.String()
+	return strings.Replace(masked, "://", "://***@", 1)
+}
+
+func maskDatabaseURI(rawURI string) string {
+	if rawURI == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(rawURI)
+	if err != nil {
+		return rawURI
+	}
+	if parsed.User == nil {
+		return rawURI
+	}
+	if _, hasPassword := parsed.User.Password(); !hasPassword {
+		return rawURI
 	}
 
 	parsed.User = nil

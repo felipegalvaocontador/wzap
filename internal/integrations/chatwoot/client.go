@@ -22,6 +22,8 @@ type CWClient interface {
 	ListContactConversations(ctx context.Context, contactID int) ([]Conversation, error)
 	CreateConversation(ctx context.Context, req CreateConversationReq) (*Conversation, error)
 	UpdateConversationStatus(ctx context.Context, convID int, status string) error
+	GetConversation(ctx context.Context, convID int) (*Conversation, error)
+	MergeContacts(ctx context.Context, baseID, mergeeID int) error
 	CreateMessage(ctx context.Context, convID int, req MessageReq) (*Message, error)
 	CreateMessageWithAttachment(ctx context.Context, convID int, content string, filename string, data []byte, mimeType string, messageType string, sourceID string) (*Message, error)
 	DeleteMessage(ctx context.Context, convID, msgID int) error
@@ -132,6 +134,7 @@ type CreateContactReq struct {
 	Identifier           string         `json:"identifier,omitempty"`
 	PhoneNumber          string         `json:"phone_number,omitempty"`
 	Email                string         `json:"email,omitempty"`
+	AvatarURL            string         `json:"avatar_url,omitempty"`
 	AdditionalAttributes map[string]any `json:"additional_attributes,omitempty"`
 }
 
@@ -156,6 +159,7 @@ type UpdateContactReq struct {
 	Name                 string         `json:"name,omitempty"`
 	Email                string         `json:"email,omitempty"`
 	PhoneNumber          string         `json:"phone_number,omitempty"`
+	AvatarURL            string         `json:"avatar_url,omitempty"`
 	AdditionalAttributes map[string]any `json:"additional_attributes,omitempty"`
 }
 
@@ -210,6 +214,28 @@ func (c *Client) CreateConversation(ctx context.Context, req CreateConversationR
 func (c *Client) UpdateConversationStatus(ctx context.Context, convID int, status string) error {
 	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d/toggle_status", c.accountID, convID)
 	body := map[string]string{"status": status}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, path, data, nil, "")
+}
+
+func (c *Client) GetConversation(ctx context.Context, convID int) (*Conversation, error) {
+	var result Conversation
+	path := fmt.Sprintf("/api/v1/accounts/%d/conversations/%d", c.accountID, convID)
+	if err := c.do(ctx, http.MethodGet, path, nil, &result, ""); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) MergeContacts(ctx context.Context, baseID, mergeeID int) error {
+	path := fmt.Sprintf("/api/v1/accounts/%d/actions/contact_merge", c.accountID)
+	body := map[string]int{
+		"base_contact_id":   baseID,
+		"mergee_contact_id": mergeeID,
+	}
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err

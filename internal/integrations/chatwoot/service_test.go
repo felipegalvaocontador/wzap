@@ -3,6 +3,7 @@ package chatwoot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -400,5 +401,57 @@ func TestOnEvent_OutgoingMessage(t *testing.T) {
 	}
 	if mockClient.lastMessageType != "outgoing" {
 		t.Errorf("expected MessageType = outgoing, got %s", mockClient.lastMessageType)
+	}
+}
+
+type mockCWClientWithErr struct {
+	mockCWClient
+	createMsgErr error
+}
+
+func (m *mockCWClientWithErr) CreateMessage(_ context.Context, _ int, req MessageReq) (*Message, error) {
+	if m.createMsgErr != nil {
+		return nil, m.createMsgErr
+	}
+	return m.mockCWClient.CreateMessage(context.Background(), 0, req)
+}
+
+func newTestServiceWithErr(createMsgErr error) *Service {
+	client := &mockCWClientWithErr{
+		mockCWClient: mockCWClient{
+			contacts:      []Contact{{ID: 1}},
+			conversations: []Conversation{{ID: 1, InboxID: 1, Status: "open"}},
+		},
+		createMsgErr: createMsgErr,
+	}
+	return &Service{
+		repo:       &mockRepo{cfg: &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}},
+		msgRepo:    &mockMsgRepoWithDuplicates{existingSourceIDs: map[string]bool{}},
+		clientFn:   func(_ *ChatwootConfig) CWClient { return client },
+		cache:      newMemoryCache(context.Background()),
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		cb:         newCircuitBreakerManager(),
+	}
+}
+
+func TestProcessInboundEvent_RetryableError_ReturnsError(t *testing.T) {
+	retryableErr := fmt.Errorf("chatwoot API error: status=500, body=internal server error")
+	svc := newTestServiceWithErr(retryableErr)
+
+	payload := buildMsgPayload(t, "msg-retryable")
+	err := svc.processInboundEvent(context.Background(), "sess", model.EventMessage, payload)
+	if err == nil {
+		t.Error("expected non-nil error for retryable CreateMessage failure")
+	}
+}
+
+func TestProcessInboundEvent_PermanentError_ReturnsNil(t *testing.T) {
+	permanentErr := fmt.Errorf("chatwoot API error: status=422, body=unprocessable entity")
+	svc := newTestServiceWithErr(permanentErr)
+
+	payload := buildMsgPayload(t, "msg-permanent")
+	err := svc.processInboundEvent(context.Background(), "sess", model.EventMessage, payload)
+	if err != nil {
+		t.Errorf("expected nil error for permanent CreateMessage failure, got: %v", err)
 	}
 }

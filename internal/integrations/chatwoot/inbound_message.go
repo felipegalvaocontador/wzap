@@ -18,11 +18,11 @@ import (
 	"wzap/internal/model"
 )
 
-func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
+func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payload []byte) error {
 	data, err := parseMessagePayload(payload)
 	if err != nil {
 		logger.Warn().Err(err).Msg("[CW] Failed to parse message payload")
-		return
+		return nil
 	}
 
 	logger.Debug().Str("chat", data.Info.Chat).Str("id", data.Info.ID).Bool("fromMe", data.Info.IsFromMe).Msg("[CW] handleMessage")
@@ -30,7 +30,7 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 	chatJID := data.Info.Chat
 	if chatJID == "" {
 		logger.Warn().Msg("[CW] chatJID empty, skipping")
-		return
+		return nil
 	}
 
 	if strings.HasSuffix(chatJID, "@lid") && s.jidResolver != nil {
@@ -42,7 +42,7 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 
 	if shouldIgnoreJID(chatJID, cfg.IgnoreGroups, cfg.IgnoreJIDs) {
 		logger.Debug().Str("chat", chatJID).Msg("[CW] JID ignored, skipping")
-		return
+		return nil
 	}
 
 	pushName := data.Info.PushName
@@ -64,7 +64,7 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 		if isDup {
 			logger.Debug().Str("sourceID", sourceID).Msg("[CW] inbound duplicate, skipping")
 			metrics.CWIdempotentDrops.WithLabelValues(cfg.SessionID).Inc()
-			return
+			return nil
 		}
 		s.cache.SetIdempotent(ctx, cfg.SessionID, sourceID)
 
@@ -97,54 +97,54 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 	convSpan.End()
 	if err != nil {
 		logger.Warn().Err(err).Str("session", cfg.SessionID).Str("chatJID", chatJID).Msg("Failed to find or create Chatwoot conversation")
-		return
+		return err
 	}
 
 	msg := data.Message
 
 	if pollMsg := getMapField(msg, "pollCreationMessage"); pollMsg != nil {
 		s.handlePollCreation(ctx, cfg, convID, msgID, fromMe, pollMsg)
-		return
+		return nil
 	}
 	if pollMsg := getMapField(msg, "pollCreationMessageV3"); pollMsg != nil {
 		s.handlePollCreation(ctx, cfg, convID, msgID, fromMe, pollMsg)
-		return
+		return nil
 	}
 	if pollUpdate := getMapField(msg, "pollUpdateMessage"); pollUpdate != nil {
 		s.handlePollUpdate(ctx, cfg, pollUpdate)
-		return
+		return nil
 	}
 	if reactMsg := getMapField(msg, "reactionMessage"); reactMsg != nil {
 		s.handleReaction(ctx, cfg, convID, msgID, fromMe, reactMsg)
-		return
+		return nil
 	}
 	if btnResp := getMapField(msg, "buttonsResponseMessage"); btnResp != nil {
 		s.handleButtonResponse(ctx, cfg, convID, msgID, fromMe, msg, btnResp)
-		return
+		return nil
 	}
 	if listResp := getMapField(msg, "listResponseMessage"); listResp != nil {
 		s.handleListResponse(ctx, cfg, convID, msgID, fromMe, msg, listResp)
-		return
+		return nil
 	}
 	if tmplReply := getMapField(msg, "templateButtonReplyMessage"); tmplReply != nil {
 		s.handleTemplateButtonReply(ctx, cfg, convID, msgID, fromMe, msg, tmplReply)
-		return
+		return nil
 	}
 	if vonce := getMapField(msg, "viewOnceMessage"); vonce != nil {
-		s.handleViewOnce(ctx, cfg, convID, msgID, fromMe, vonce)
-		return
+		s.handleViewOnce(ctx, cfg, convID, msgID, fromMe, vonce, false)
+		return nil
 	}
 	if vonce := getMapField(msg, "viewOnceMessageV2"); vonce != nil {
-		s.handleViewOnce(ctx, cfg, convID, msgID, fromMe, vonce)
-		return
+		s.handleViewOnce(ctx, cfg, convID, msgID, fromMe, vonce, true)
+		return nil
 	}
 	if editMsg := getMapField(msg, "editedMessage"); editMsg != nil {
 		s.handleEditedMessage(ctx, cfg, editMsg)
-		return
+		return nil
 	}
 	if liveMsg := getMapField(msg, "liveLocationMessage"); liveMsg != nil {
 		s.handleLiveLocation(ctx, cfg, convID, msgID, fromMe, liveMsg)
-		return
+		return nil
 	}
 
 	mediaInfo := extractMediaInfo(msg)
@@ -154,7 +154,7 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 		} else {
 			s.handleMediaMessage(ctx, cfg, convID, msgID, fromMe, msg)
 		}
-		return
+		return nil
 	}
 
 	text := extractTextFromMessage(msg)
@@ -162,12 +162,20 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 	text = applyMessagePrefixes(msg, convertWAToCWMarkdown(text))
 
 	if !fromMe && data.Info.IsGroup && cfg.SignMsg && pushName != "" {
-		phone := extractPhone(chatJID)
+		senderJID := data.Info.Sender
+		if strings.HasSuffix(senderJID, "@lid") {
+			if data.Info.SenderAlt != "" {
+				senderJID = data.Info.SenderAlt
+			} else {
+				senderJID = s.resolveJID(ctx, cfg.SessionID, senderJID)
+			}
+		}
+		phone := extractPhone(senderJID)
 		text = formatGroupContent(phone, pushName, text, fromMe)
 	}
 
 	if text == "" {
-		return
+		return nil
 	}
 
 	messageType := "outgoing"
@@ -199,13 +207,23 @@ func (s *Service) handleMessage(ctx context.Context, cfg *ChatwootConfig, payloa
 	client := s.clientFn(cfg)
 	cwMsg, err := client.CreateMessage(ctx, convID, msgReq)
 	if err != nil {
-		logger.Warn().Err(err).Str("session", cfg.SessionID).Msg("Failed to create Chatwoot message")
-		return
+		if strings.Contains(err.Error(), "status=404") {
+			s.cache.DeleteConv(ctx, cfg.SessionID, chatJID)
+			convID, err = s.findOrCreateConversationSlowPath(ctx, cfg, chatJID, contactPushName)
+			if err == nil {
+				cwMsg, err = client.CreateMessage(ctx, convID, msgReq)
+			}
+		}
+		if err != nil {
+			logger.Warn().Err(err).Str("session", cfg.SessionID).Msg("Failed to create Chatwoot message")
+			return err
+		}
 	}
 	if msgID != "" {
 		_ = s.msgRepo.UpdateChatwootRef(ctx, cfg.SessionID, msgID, cwMsg.ID, convID, cwMsg.SourceID)
 		s.cache.SetIdempotent(ctx, cfg.SessionID, sourceID)
 	}
+	return nil
 }
 
 func hasCWMessageID(msg *model.Message) bool {
@@ -445,7 +463,7 @@ func (s *Service) handlePollCreation(ctx context.Context, cfg *ChatwootConfig, c
 	sb.WriteString("\n")
 	for i, opt := range optionsRaw {
 		if optMap, ok := opt.(map[string]interface{}); ok {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, getStringField(optMap, "optionName")))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, getStringField(optMap, "optionName"))
 		}
 	}
 
@@ -477,7 +495,7 @@ func (s *Service) handlePollUpdate(ctx context.Context, cfg *ChatwootConfig, pol
 	if pollCreation == nil {
 		return
 	}
-	pollMsgID := getStringField(pollCreation, "id")
+	pollMsgID := getStringField(pollCreation, "ID")
 	if pollMsgID == "" {
 		return
 	}
@@ -496,7 +514,7 @@ func (s *Service) handlePollUpdate(ctx context.Context, cfg *ChatwootConfig, pol
 	sb.WriteString("📊 *Voto registrado:*\n")
 	for _, opt := range selectedOpts {
 		if optMap, ok := opt.(map[string]interface{}); ok {
-			sb.WriteString(fmt.Sprintf("✅ %s\n", getStringField(optMap, "optionName")))
+			fmt.Fprintf(&sb, "✅ %s\n", getStringField(optMap, "optionName"))
 		}
 	}
 
@@ -514,11 +532,12 @@ func (s *Service) handleReaction(ctx context.Context, cfg *ChatwootConfig, convI
 	if key == nil {
 		return
 	}
-	targetMsgID := getStringField(key, "id")
+	targetMsgID := getStringField(key, "ID")
 	emoji := getStringField(reactMsg, "text")
 
 	origMsg, err := s.msgRepo.FindByID(ctx, cfg.SessionID, targetMsgID)
 	if err != nil || origMsg.CWMessageID == nil {
+		logger.Warn().Str("session", cfg.SessionID).Str("targetMsgID", targetMsgID).Str("emoji", emoji).Msg("[CW] reaction target message not found in DB, skipping")
 		return
 	}
 
@@ -662,7 +681,7 @@ func (s *Service) handleTemplateButtonReply(ctx context.Context, cfg *ChatwootCo
 	}
 }
 
-func (s *Service) handleViewOnce(ctx context.Context, cfg *ChatwootConfig, convID int, msgID string, fromMe bool, vonce map[string]interface{}) {
+func (s *Service) handleViewOnce(ctx context.Context, cfg *ChatwootConfig, convID int, msgID string, fromMe bool, vonce map[string]interface{}, tryDownload bool) {
 	client := s.clientFn(cfg)
 	messageType := "incoming"
 	if fromMe {
@@ -672,6 +691,45 @@ func (s *Service) handleViewOnce(ctx context.Context, cfg *ChatwootConfig, convI
 	if msgID != "" {
 		sourceID = "WAID:" + msgID
 	}
+
+	if tryDownload {
+		if innerMsg := getMapField(vonce, "message"); innerMsg != nil && s.mediaDownloader != nil {
+			info := extractMediaInfo(innerMsg)
+			if info != nil {
+				timeout := time.Duration(cfg.TimeoutMediaSeconds) * time.Second
+				if cfg.TimeoutMediaSeconds == 0 {
+					timeout = 60 * time.Second
+				}
+				mediaCtx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+
+				data, err := s.mediaDownloader.DownloadMediaByPath(mediaCtx, cfg.SessionID, info.DirectPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType)
+				if err == nil && len(data) > 0 {
+					mimeType := info.MimeType
+					if mimeType == "" {
+						mimeType, _ = GetMIMETypeAndExt("", data)
+					}
+					filename := info.FileName
+					if filename == "" {
+						ext := mimeTypeToExt(mimeType)
+						filename = info.MediaType + ext
+					}
+
+					cwMsg, err := client.CreateMessageWithAttachment(ctx, convID, "", filename, data, mimeType, messageType, sourceID)
+					if err == nil {
+						if msgID != "" {
+							_ = s.msgRepo.UpdateChatwootRef(ctx, cfg.SessionID, msgID, cwMsg.ID, convID, cwMsg.SourceID)
+						}
+						return
+					}
+					logger.Warn().Err(err).Msg("[CW] failed to upload viewOnce media, falling back to text")
+				} else if err != nil {
+					logger.Warn().Err(err).Msg("[CW] failed to download viewOnce media, falling back to text")
+				}
+			}
+		}
+	}
+
 	cwMsg, err := client.CreateMessage(ctx, convID, MessageReq{
 		Content:     "[mensagem vista uma vez]",
 		MessageType: messageType,
@@ -690,7 +748,7 @@ func (s *Service) handleEditedMessage(ctx context.Context, cfg *ChatwootConfig, 
 	if key == nil {
 		return
 	}
-	targetMsgID := getStringField(key, "id")
+	targetMsgID := getStringField(key, "ID")
 	if targetMsgID == "" {
 		return
 	}
@@ -713,9 +771,7 @@ func (s *Service) handleEditedMessage(ctx context.Context, cfg *ChatwootConfig, 
 }
 
 func (s *Service) handleLiveLocation(ctx context.Context, cfg *ChatwootConfig, convID int, msgID string, fromMe bool, liveMsg map[string]interface{}) {
-	lat := getFloatField(liveMsg, "degreesLatitude")
-	lng := getFloatField(liveMsg, "degreesLongitude")
-	text := fmt.Sprintf("📍 [Localização ao vivo]\nhttps://www.google.com/maps?q=%f,%f\n\n_Atualizações subsequentes serão ignoradas._", lat, lng)
+	text := formatLocation(liveMsg)
 
 	client := s.clientFn(cfg)
 	messageType := "incoming"

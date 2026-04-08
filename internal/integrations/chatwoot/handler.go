@@ -80,6 +80,8 @@ func configToResp(cfg *ChatwootConfig, webhookURL string) dto.ChatwootConfigResp
 		TimeoutTextSeconds:  cfg.TimeoutTextSeconds,
 		TimeoutMediaSeconds: cfg.TimeoutMediaSeconds,
 		TimeoutLargeSeconds: cfg.TimeoutLargeSeconds,
+		MessageRead:         cfg.MessageRead,
+		DatabaseURI:         maskDatabaseURI(cfg.DatabaseURI),
 		RedisURL:            maskRedisURL(cfg.RedisURL),
 	}
 }
@@ -140,6 +142,8 @@ func (h *Handler) Configure(c *fiber.Ctx) error {
 		TimeoutTextSeconds:  timeoutText,
 		TimeoutMediaSeconds: timeoutMedia,
 		TimeoutLargeSeconds: timeoutLarge,
+		MessageRead:         req.MessageRead != nil && *req.MessageRead,
+		DatabaseURI:         req.DatabaseURI,
 		RedisURL:            req.RedisURL,
 	}
 

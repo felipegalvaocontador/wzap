@@ -29,8 +29,8 @@ func (r *Repository) Upsert(ctx context.Context, cfg *ChatwootConfig) error {
 			merge_br_contacts, ignore_groups, ignore_jids,
 			import_on_connect, import_period,
 			timeout_text_seconds, timeout_media_seconds, timeout_large_seconds,
-			redis_url
-		 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			message_read, database_uri, redis_url
+		 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		 ON CONFLICT (session_id) DO UPDATE SET
 			url = EXCLUDED.url, account_id = EXCLUDED.account_id,
 			token = EXCLUDED.token, webhook_token = EXCLUDED.webhook_token,
@@ -45,6 +45,7 @@ func (r *Repository) Upsert(ctx context.Context, cfg *ChatwootConfig) error {
 			timeout_text_seconds = EXCLUDED.timeout_text_seconds,
 			timeout_media_seconds = EXCLUDED.timeout_media_seconds,
 			timeout_large_seconds = EXCLUDED.timeout_large_seconds,
+			message_read = EXCLUDED.message_read, database_uri = EXCLUDED.database_uri,
 			redis_url = EXCLUDED.redis_url, updated_at = NOW()`,
 		cfg.SessionID, cfg.URL, cfg.AccountID, cfg.Token, cfg.WebhookToken,
 		cfg.InboxID, cfg.InboxName, cfg.Enabled,
@@ -52,7 +53,7 @@ func (r *Repository) Upsert(ctx context.Context, cfg *ChatwootConfig) error {
 		cfg.MergeBRContacts, cfg.IgnoreGroups, cfg.IgnoreJIDs,
 		cfg.ImportOnConnect, cfg.ImportPeriod,
 		cfg.TimeoutTextSeconds, cfg.TimeoutMediaSeconds, cfg.TimeoutLargeSeconds,
-		cfg.RedisURL)
+		cfg.MessageRead, cfg.DatabaseURI, cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("failed to upsert chatwoot config: %w", err)
 	}
@@ -68,6 +69,7 @@ func (r *Repository) FindBySessionID(ctx context.Context, sessionID string) (*Ch
 			merge_br_contacts, ignore_groups, ignore_jids,
 			import_on_connect, import_period,
 			timeout_text_seconds, timeout_media_seconds, timeout_large_seconds,
+			COALESCE(message_read, false), COALESCE(database_uri, ''),
 			redis_url, enabled, created_at, updated_at
 		 FROM wz_chatwoot WHERE session_id = $1`,
 		sessionID).Scan(
@@ -77,6 +79,7 @@ func (r *Repository) FindBySessionID(ctx context.Context, sessionID string) (*Ch
 		&cfg.MergeBRContacts, &cfg.IgnoreGroups, &cfg.IgnoreJIDs,
 		&cfg.ImportOnConnect, &cfg.ImportPeriod,
 		&cfg.TimeoutTextSeconds, &cfg.TimeoutMediaSeconds, &cfg.TimeoutLargeSeconds,
+		&cfg.MessageRead, &cfg.DatabaseURI,
 		&cfg.RedisURL, &cfg.Enabled, &cfg.CreatedAt, &cfg.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find chatwoot config: %w", err)

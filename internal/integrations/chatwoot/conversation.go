@@ -49,23 +49,54 @@ func (s *Service) findOrCreateConversationSlowPath(ctx context.Context, cfg *Cha
 		}
 	}
 
+	if cfg.MergeBRContacts && len(contacts) == 2 {
+		phone0 := strings.TrimPrefix(contacts[0].PhoneNumber, "+")
+		phone1 := strings.TrimPrefix(contacts[1].PhoneNumber, "+")
+		var baseID, mergeeID int
+		if len(phone0) == 14 && len(phone1) == 13 {
+			baseID = contacts[0].ID
+			mergeeID = contacts[1].ID
+		} else if len(phone1) == 14 && len(phone0) == 13 {
+			baseID = contacts[1].ID
+			mergeeID = contacts[0].ID
+		}
+		if baseID > 0 && mergeeID > 0 {
+			if err := client.MergeContacts(ctx, baseID, mergeeID); err != nil {
+				logger.Warn().Err(err).Int("baseID", baseID).Int("mergeeID", mergeeID).Msg("[CW] failed to merge BR contacts")
+			}
+			contacts = []Contact{{ID: baseID}}
+		}
+	}
+
 	var contactID int
 	if len(contacts) == 0 {
 		name := pushName
 		if name == "" {
 			name = phone
 		}
+		var avatarURL string
+		if s.profilePicGetter != nil {
+			if picURL, err := s.profilePicGetter.GetProfilePicture(ctx, cfg.SessionID, chatJID); err == nil {
+				avatarURL = picURL
+			}
+		}
 		contact, err := client.CreateContact(ctx, CreateContactReq{
 			InboxID:     cfg.InboxID,
 			Name:        name,
 			Identifier:  chatJID,
 			PhoneNumber: "+" + phone,
+			AvatarURL:   avatarURL,
 		})
 		if err != nil {
 			return 0, fmt.Errorf("failed to create contact: %w", err)
 		}
 		logger.Debug().Int("contactID", contact.ID).Str("phone", phone).Msg("[CW] contact created")
 		contactID = contact.ID
+		if cfg.DatabaseURI != "" {
+			if err := addLabelToContact(ctx, cfg.DatabaseURI, cfg.InboxName, contact.ID); err != nil {
+				logger.Warn().Err(err).Int("contactID", contact.ID).Msg("[CW] failed to add label to contact")
+			}
+		}
 	} else {
 		contactID = contacts[0].ID
 		logger.Debug().Int("contactID", contactID).Str("phone", phone).Msg("[CW] contact found")

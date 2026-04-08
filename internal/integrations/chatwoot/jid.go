@@ -1,6 +1,7 @@
 package chatwoot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -74,4 +75,14 @@ func formatGroupContent(phone, pushName, body string, fromMe bool) string {
 		return body
 	}
 	return fmt.Sprintf("**+%s - %s:**\n\n%s", phone, pushName, body)
+}
+
+func (s *Service) resolveJID(ctx context.Context, sessionID, jid string) string {
+	if !strings.HasSuffix(jid, "@lid") || s.jidResolver == nil {
+		return jid
+	}
+	if pn := s.jidResolver.GetPNForLID(ctx, sessionID, jid); pn != "" {
+		return pn + "@s.whatsapp.net"
+	}
+	return jid
 }

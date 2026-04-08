@@ -115,6 +115,16 @@ func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig
 
 	replyTo := s.resolveOutboundReply(ctx, cfg.SessionID, msg.ContentAttributes)
 
+	var senderName string
+	if cfg.SignMsg {
+		if len(conv.Messages) > 0 && conv.Messages[0].Sender != nil {
+			senderName = conv.Messages[0].Sender.AvailableName
+		}
+		if senderName == "" && msg.Sender != nil {
+			senderName = msg.Sender.Name
+		}
+	}
+
 	cwMsgID := msg.ID
 	cwConvID := conv.ID
 	saveCWRef := func(waMsgID, msgType, body string) {
@@ -134,24 +144,28 @@ func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig
 	}
 
 	if len(msg.Attachments) > 0 {
+		caption := signContent(msg.Content, senderName, cfg.SignDelimiter)
 		for _, att := range msg.Attachments {
 			attURL := att.DataURL
 			if attURL == "" {
 				attURL = att.URL
 			}
 			attURL = rewriteAttachmentURL(attURL, cfg.URL)
-			waMsgID, err := s.sendAttachmentToWhatsApp(ctx, cfg, chatJID, attURL, msg.Content, att.FileType, replyTo)
+			waMsgID, err := s.sendAttachmentToWhatsApp(ctx, cfg, chatJID, attURL, caption, att.FileType, replyTo)
 			if err != nil {
 				logger.Warn().Err(err).Msg("Failed to send attachment from Chatwoot to WhatsApp")
+				s.sendErrorToAgent(ctx, cfg, cwConvID, err)
 				continue
 			}
 			saveCWRef(waMsgID, "media", msg.Content)
 		}
+		s.markReadIfEnabled(ctx, cfg, chatJID)
 		return nil
 	}
 
 	content := msg.Content
 	content = convertCWToWAMarkdown(content)
+	content = signContent(content, senderName, cfg.SignDelimiter)
 
 	if lat, lng, ok := extractLocationFromText(content); ok {
 		waMsgID, err := s.messageSvc.SendLocation(ctx, cfg.SessionID, dto.SendLocationReq{
@@ -174,10 +188,13 @@ func (s *Service) handleOutgoingMessage(ctx context.Context, cfg *ChatwootConfig
 		Body:    content,
 		ReplyTo: replyTo,
 	})
-	if err == nil {
-		saveCWRef(waMsgID, "text", content)
+	if err != nil {
+		s.sendErrorToAgent(ctx, cfg, cwConvID, err)
+		return err
 	}
-	return err
+	saveCWRef(waMsgID, "text", content)
+	s.markReadIfEnabled(ctx, cfg, chatJID)
+	return nil
 }
 
 func (s *Service) handleMessageEdited(ctx context.Context, cfg *ChatwootConfig, body dto.ChatwootWebhookPayload) error {
@@ -444,4 +461,47 @@ func (s *Service) resolveOutboundReply(ctx context.Context, sessionID string, at
 		}
 	}
 	return nil
+}
+
+func signContent(content, senderName, delimiter string) string {
+	if senderName == "" {
+		return content
+	}
+	prefix := fmt.Sprintf("*%s:*", senderName)
+	if strings.HasPrefix(content, prefix) {
+		return content
+	}
+	if delimiter == "" {
+		delimiter = "\n"
+	}
+	delimiter = strings.ReplaceAll(delimiter, `\n`, "\n")
+	return fmt.Sprintf("%s%s%s", prefix, delimiter, content)
+}
+
+func (s *Service) markReadIfEnabled(ctx context.Context, cfg *ChatwootConfig, chatJID string) {
+	if !cfg.MessageRead {
+		return
+	}
+	lastMsg, err := s.msgRepo.FindLastReceivedByChat(ctx, cfg.SessionID, chatJID)
+	if err != nil {
+		return
+	}
+	_ = s.messageSvc.MarkRead(ctx, cfg.SessionID, dto.MarkReadReq{
+		Phone:     lastMsg.ChatJID,
+		MessageID: lastMsg.ID,
+	})
+}
+
+func (s *Service) sendErrorToAgent(ctx context.Context, cfg *ChatwootConfig, convID int, sendErr error) {
+	client := s.clientFn(cfg)
+	errMsg := sendErr.Error()
+	if strings.Contains(errMsg, "connection") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "EOF") {
+		errMsg = "falha de conexão com o servidor WhatsApp"
+	}
+	content := fmt.Sprintf("_Mensagem não enviada: %s_", errMsg)
+	_, _ = client.CreateMessage(ctx, convID, MessageReq{
+		Content:     content,
+		MessageType: "outgoing",
+		Private:     true,
+	})
 }

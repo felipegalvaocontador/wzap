@@ -27,6 +27,7 @@ type MessageService interface {
 	SendLocation(ctx context.Context, sessionID string, req dto.SendLocationReq) (string, error)
 	DeleteMessage(ctx context.Context, sessionID string, req dto.DeleteMessageReq) (string, error)
 	EditMessage(ctx context.Context, sessionID string, req dto.EditMessageReq) (string, error)
+	MarkRead(ctx context.Context, sessionID string, req dto.MarkReadReq) error
 }
 type JIDResolver interface {
 	GetPNForLID(ctx context.Context, sessionID, lidJID string) string
@@ -40,27 +41,31 @@ type SessionConnector interface {
 	Logout(ctx context.Context, sessionID string) error
 	IsConnected(sessionID string) bool
 }
+type ProfilePictureGetter interface {
+	GetProfilePicture(ctx context.Context, sessionID, jid string) (string, error)
+}
 
 type noConfigEntry struct {
 	expiresAt time.Time
 }
 
 type Service struct {
-	repo            Repo
-	msgRepo         repo.MessageRepo
-	clientFn        func(cfg *ChatwootConfig) CWClient
-	messageSvc      MessageService
-	cache           Cache
-	jidResolver     JIDResolver
-	mediaDownloader MediaDownloader
-	connector       SessionConnector
-	serverURL       string
-	lastBotNotify   sync.Map
-	httpClient      *http.Client
-	js              jetstream.JetStream
-	cb              *circuitBreakerManager
-	convFlight      singleflight.Group
-	noConfigCache   sync.Map
+	repo             Repo
+	msgRepo          repo.MessageRepo
+	clientFn         func(cfg *ChatwootConfig) CWClient
+	messageSvc       MessageService
+	cache            Cache
+	jidResolver      JIDResolver
+	mediaDownloader  MediaDownloader
+	connector        SessionConnector
+	profilePicGetter ProfilePictureGetter
+	serverURL        string
+	lastBotNotify    sync.Map
+	httpClient       *http.Client
+	js               jetstream.JetStream
+	cb               *circuitBreakerManager
+	convFlight       singleflight.Group
+	noConfigCache    sync.Map
 }
 
 func NewService(ctx context.Context, repo Repo, msgRepo repo.MessageRepo, messageSvc MessageService) *Service {
@@ -77,12 +82,13 @@ func NewService(ctx context.Context, repo Repo, msgRepo repo.MessageRepo, messag
 	}
 }
 
-func (s *Service) SetJIDResolver(r JIDResolver)           { s.jidResolver = r }
-func (s *Service) SetMediaDownloader(d MediaDownloader)   { s.mediaDownloader = d }
-func (s *Service) SetSessionConnector(c SessionConnector) { s.connector = c }
-func (s *Service) SetServerURL(url string)                { s.serverURL = url }
-func (s *Service) SetJetStream(js jetstream.JetStream)    { s.js = js }
-func (s *Service) SetCache(c Cache)                       { s.cache = c }
+func (s *Service) SetJIDResolver(r JIDResolver)                   { s.jidResolver = r }
+func (s *Service) SetMediaDownloader(d MediaDownloader)           { s.mediaDownloader = d }
+func (s *Service) SetSessionConnector(c SessionConnector)         { s.connector = c }
+func (s *Service) SetProfilePictureGetter(p ProfilePictureGetter) { s.profilePicGetter = p }
+func (s *Service) SetServerURL(url string)                        { s.serverURL = url }
+func (s *Service) SetJetStream(js jetstream.JetStream)            { s.js = js }
+func (s *Service) SetCache(c Cache)                               { s.cache = c }
 func (s *Service) InvalidateNoConfigCache(sessionID string) {
 	s.noConfigCache.Delete(sessionID)
 }
@@ -126,7 +132,19 @@ func (s *Service) processInboundEvent(ctx context.Context, sessionID string, eve
 
 	switch event {
 	case model.EventMessage:
-		s.handleMessage(ctx, cfg, payload)
+		if err := s.handleMessage(ctx, cfg, payload); err != nil {
+			if isRetryableError(err) {
+				return err
+			}
+			logger.Warn().Err(err).Str("session", sessionID).Msg("[CW] permanent error in handleMessage, dropping")
+		}
+	case model.EventGroupInfo:
+		if err := s.handleGroupInfo(ctx, cfg, payload); err != nil {
+			if isRetryableError(err) {
+				return err
+			}
+			logger.Warn().Err(err).Str("session", sessionID).Msg("[CW] permanent error in handleGroupInfo, dropping")
+		}
 	case model.EventReceipt:
 		s.handleReceipt(ctx, cfg, payload)
 	case model.EventDeleteForMe:
@@ -143,8 +161,6 @@ func (s *Service) processInboundEvent(ctx context.Context, sessionID string, eve
 		s.handlePushName(ctx, cfg, payload)
 	case model.EventPicture:
 		s.handlePicture(ctx, cfg, payload)
-	case model.EventGroupInfo:
-		s.handleGroupInfo(ctx, cfg, payload)
 	case model.EventHistorySync:
 		s.handleHistorySync(ctx, cfg, payload)
 	}

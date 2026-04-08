@@ -32,13 +32,15 @@ func (ft *flexTimestamp) UnmarshalJSON(b []byte) error {
 }
 
 type waMessageInfo struct {
-	Chat      string        `json:"Chat"`
-	Sender    string        `json:"Sender"`
-	IsFromMe  bool          `json:"IsFromMe"`
-	IsGroup   bool          `json:"IsGroup"`
-	ID        string        `json:"ID"`
-	PushName  string        `json:"PushName"`
-	Timestamp flexTimestamp `json:"Timestamp"`
+	Chat           string        `json:"Chat"`
+	Sender         string        `json:"Sender"`
+	SenderAlt      string        `json:"SenderAlt"`
+	AddressingMode string        `json:"AddressingMode"`
+	IsFromMe       bool          `json:"IsFromMe"`
+	IsGroup        bool          `json:"IsGroup"`
+	ID             string        `json:"ID"`
+	PushName       string        `json:"PushName"`
+	Timestamp      flexTimestamp `json:"Timestamp"`
 }
 
 type waMessagePayload struct {
@@ -180,6 +182,7 @@ var msgTypeKeys = []struct {
 	{"pollCreationMessage", "poll"},
 	{"pollCreationMessageV3", "poll"},
 	{"documentWithCaptionMessage", "document"},
+	{"reactionMessage", "reaction"},
 }
 
 func detectMessageType(msg map[string]interface{}) string {
@@ -239,13 +242,7 @@ func extractTextFromMessage(msg map[string]interface{}) string {
 	}
 
 	if locMsg := getMapField(msg, "locationMessage"); locMsg != nil {
-		lat := getFloatField(locMsg, "degreesLatitude")
-		lng := getFloatField(locMsg, "degreesLongitude")
-		name := getStringField(locMsg, "name")
-		if name != "" {
-			return fmt.Sprintf("📍 %s\nhttps://www.google.com/maps?q=%f,%f", name, lat, lng)
-		}
-		return fmt.Sprintf("📍 Location\nhttps://www.google.com/maps?q=%f,%f", lat, lng)
+		return formatLocation(locMsg)
 	}
 
 	if contactMsg := getMapField(msg, "contactMessage"); contactMsg != nil {
@@ -260,20 +257,46 @@ func extractTextFromMessage(msg map[string]interface{}) string {
 		var parts []string
 		for _, c := range contacts {
 			if cm, ok := c.(map[string]interface{}); ok {
+				displayName := getStringField(cm, "displayName")
 				if vcard := getStringField(cm, "vcard"); vcard != "" {
-					parts = append(parts, formatVCard(vcard))
+					formatted := formatVCardWithName(vcard, displayName)
+					parts = append(parts, formatted)
 				}
 			}
 		}
 		if len(parts) > 0 {
-			return fmt.Sprintf("📇 Contatos:\n%s", joinStrings(parts, "\n\n"))
+			return joinStrings(parts, "\n\n")
 		}
 	}
 
 	return ""
 }
 
+func formatLocation(locMsg map[string]interface{}) string {
+	lat := getFloatField(locMsg, "degreesLatitude")
+	lng := getFloatField(locMsg, "degreesLongitude")
+	name := getStringField(locMsg, "name")
+	address := getStringField(locMsg, "address")
+
+	var sb strings.Builder
+	sb.WriteString("*Localização:*\n\n")
+	fmt.Fprintf(&sb, "_Latitude:_ %f\n", lat)
+	fmt.Fprintf(&sb, "_Longitude:_ %f\n", lng)
+	if name != "" {
+		fmt.Fprintf(&sb, "_Nome:_ %s\n", name)
+	}
+	if address != "" {
+		fmt.Fprintf(&sb, "_Endereço:_ %s\n", address)
+	}
+	fmt.Fprintf(&sb, "_URL:_ https://www.google.com/maps/search/?api=1&query=%f,%f", lat, lng)
+	return sb.String()
+}
+
 func formatVCard(vcard string) string {
+	return formatVCardWithName(vcard, "")
+}
+
+func formatVCardWithName(vcard, displayName string) string {
 	name := ""
 	var phones []string
 	for _, line := range splitLines(vcard) {
@@ -285,14 +308,20 @@ func formatVCard(vcard string) string {
 			}
 		}
 	}
+	if displayName != "" {
+		name = displayName
+	}
 	if name == "" {
 		return vcard
 	}
-	result := "📇 " + name
-	for _, phone := range phones {
-		result += "\n📞 " + phone
+	var sb strings.Builder
+	sb.WriteString("*Contato:*\n\n")
+	sb.WriteString("_Nome:_ ")
+	sb.WriteString(name)
+	for i, phone := range phones {
+		fmt.Fprintf(&sb, "\n_Número (%d):_ %s", i+1, phone)
 	}
-	return result
+	return sb.String()
 }
 
 func splitLines(s string) []string {

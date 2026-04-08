@@ -3,6 +3,7 @@ package chatwoot
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -119,7 +120,7 @@ func TestHandleReaction_Add(t *testing.T) {
 	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}
 
 	reactMsg := map[string]interface{}{
-		"key":  map[string]interface{}{"id": "target-msg"},
+		"key":  map[string]interface{}{"ID": "target-msg"},
 		"text": "👍",
 	}
 	svc.handleReaction(context.Background(), cfg, convID, "react-msg", false, reactMsg)
@@ -144,7 +145,7 @@ func TestHandleReaction_Remove(t *testing.T) {
 	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}
 
 	reactMsg := map[string]interface{}{
-		"key":  map[string]interface{}{"id": "target-msg"},
+		"key":  map[string]interface{}{"ID": "target-msg"},
 		"text": "",
 	}
 	svc.handleReaction(context.Background(), cfg, convID, "react-msg", false, reactMsg)
@@ -273,23 +274,13 @@ func TestHandleGroupInfo_ParticipantAdd(t *testing.T) {
 	}
 	svc := newTestService(client)
 
-	data := struct {
-		JID     string `json:"JID"`
-		Updates []struct {
-			Type        string `json:"Type"`
-			Participant string `json:"Participant"`
-		} `json:"Updates"`
-		Sender struct{ User string } `json:"Sender"`
-	}{
-		JID: "123456789-987654321@g.us",
-		Updates: []struct {
-			Type        string `json:"Type"`
-			Participant string `json:"Participant"`
-		}{{Type: "add", Participant: "5511999999999@s.whatsapp.net"}},
+	data := map[string]interface{}{
+		"JID":  "123456789-987654321@g.us",
+		"Join": []string{"5511999999999@s.whatsapp.net"},
 	}
 	payload := buildPayload(t, "sess", model.EventGroupInfo, data)
 	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}
-	svc.handleGroupInfo(context.Background(), cfg, payload)
+	_ = svc.handleGroupInfo(context.Background(), cfg, payload)
 
 	if len(client.messages) == 0 {
 		t.Error("expected group notification message")
@@ -308,14 +299,13 @@ func TestHandleGroupInfo_SubjectChange(t *testing.T) {
 
 	data := map[string]interface{}{
 		"JID": "123456789-987654321@g.us",
-		"Updates": []interface{}{
-			map[string]interface{}{"Type": "subject", "Name": "Novo Nome do Grupo"},
+		"Name": map[string]interface{}{
+			"Name": "Novo Nome do Grupo",
 		},
-		"Sender": map[string]interface{}{"User": "5511"},
 	}
 	payload := buildPayload(t, "sess", model.EventGroupInfo, data)
 	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}
-	svc.handleGroupInfo(context.Background(), cfg, payload)
+	_ = svc.handleGroupInfo(context.Background(), cfg, payload)
 
 	if len(client.messages) == 0 {
 		t.Error("expected subject change notification")
@@ -425,5 +415,108 @@ func TestHandleButtonResponse_WithStanzaID(t *testing.T) {
 	inReplyToExtID, _ := ca["in_reply_to_external_id"].(string)
 	if inReplyToExtID != "WAID:stanza-abc" {
 		t.Errorf("expected in_reply_to_external_id=WAID:stanza-abc, got %s", inReplyToExtID)
+	}
+}
+
+// ── ViewOnce tests ───────────────────────────────────────────────────────────
+
+type mockMediaDownloader struct {
+	data []byte
+	err  error
+}
+
+func (m *mockMediaDownloader) DownloadMediaByPath(_ context.Context, _, _ string, _, _, _ []byte, _ int, _ string) ([]byte, error) {
+	return m.data, m.err
+}
+
+func TestHandleViewOnce_V2_DownloadSuccess(t *testing.T) {
+	client := &mockCWClient{
+		contacts:      []Contact{{ID: 1}},
+		conversations: []Conversation{{ID: 1, InboxID: 1, Status: "open"}},
+	}
+	svc := newTestService(client)
+	svc.mediaDownloader = &mockMediaDownloader{data: []byte("fake-image-data")}
+	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1, TimeoutMediaSeconds: 60}
+
+	vonce := map[string]interface{}{
+		"message": map[string]interface{}{
+			"imageMessage": map[string]interface{}{
+				"directPath": "/v/test",
+				"mediaKey":   "AAAA",
+				"mimetype":   "image/jpeg",
+				"fileLength": float64(1024),
+			},
+		},
+	}
+	svc.handleViewOnce(context.Background(), cfg, 1, "vo-msg", false, vonce, true)
+
+	if len(client.attachments) == 0 {
+		t.Error("expected attachment to be uploaded for viewOnce v2 with successful download")
+	}
+	if len(client.messages) > 0 {
+		t.Error("expected no text fallback when download succeeds")
+	}
+}
+
+func TestHandleViewOnce_V2_DownloadFail_FallsBackToText(t *testing.T) {
+	client := &mockCWClient{
+		contacts:      []Contact{{ID: 1}},
+		conversations: []Conversation{{ID: 1, InboxID: 1, Status: "open"}},
+	}
+	svc := newTestService(client)
+	svc.mediaDownloader = &mockMediaDownloader{err: fmt.Errorf("download failed")}
+	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1, TimeoutMediaSeconds: 60}
+
+	vonce := map[string]interface{}{
+		"message": map[string]interface{}{
+			"imageMessage": map[string]interface{}{
+				"directPath": "/v/test",
+				"mediaKey":   "AAAA",
+				"mimetype":   "image/jpeg",
+				"fileLength": float64(1024),
+			},
+		},
+	}
+	svc.handleViewOnce(context.Background(), cfg, 1, "vo-msg", false, vonce, true)
+
+	if len(client.attachments) > 0 {
+		t.Error("expected no attachment when download fails")
+	}
+	if len(client.messages) == 0 {
+		t.Fatal("expected text fallback message")
+	}
+	if !containsStr(client.messages[0].Content, "mensagem vista uma vez") {
+		t.Errorf("expected fallback text, got: %s", client.messages[0].Content)
+	}
+}
+
+func TestHandleViewOnce_V1_AlwaysText(t *testing.T) {
+	client := &mockCWClient{
+		contacts:      []Contact{{ID: 1}},
+		conversations: []Conversation{{ID: 1, InboxID: 1, Status: "open"}},
+	}
+	svc := newTestService(client)
+	svc.mediaDownloader = &mockMediaDownloader{data: []byte("should-not-be-used")}
+	cfg := &ChatwootConfig{SessionID: "sess", Enabled: true, InboxID: 1}
+
+	vonce := map[string]interface{}{
+		"message": map[string]interface{}{
+			"imageMessage": map[string]interface{}{
+				"directPath": "/v/test",
+				"mediaKey":   "AAAA",
+				"mimetype":   "image/jpeg",
+			},
+		},
+	}
+	svc.handleViewOnce(context.Background(), cfg, 1, "vo-msg", false, vonce, false)
+
+	if len(client.attachments) > 0 {
+		t.Error("expected no attachment for viewOnce v1")
+	}
+	if len(client.messages) == 0 {
+		t.Fatal("expected text message for viewOnce v1")
+	}
+	if !containsStr(client.messages[0].Content, "mensagem vista uma vez") {
+		t.Errorf("expected fallback text, got: %s", client.messages[0].Content)
 	}
 }

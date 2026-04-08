@@ -1,49 +1,53 @@
 package dto
 
 type ChatwootConfigReq struct {
-	URL                  string   `json:"url" validate:"required,url"`
-	AccountID            int      `json:"accountId" validate:"required,gt=0"`
-	Token                string   `json:"token" validate:"required"`
-	WebhookToken         string   `json:"webhookToken,omitempty"`
-	InboxID              int      `json:"inboxId,omitempty"`
-	InboxName            string   `json:"inboxName,omitempty"`
-	SignMsg              *bool    `json:"signMsg,omitempty"`
-	SignDelimiter        string   `json:"signDelimiter,omitempty"`
-	ReopenConversation   *bool    `json:"reopenConversation,omitempty"`
-	MergeBRContacts      *bool    `json:"mergeBrContacts,omitempty"`
-	IgnoreGroups         *bool    `json:"ignoreGroups,omitempty"`
-	IgnoreJIDs           []string `json:"ignoreJids,omitempty"`
-	ConversationPending  *bool    `json:"conversationPending,omitempty"`
-	AutoCreateInbox      *bool    `json:"autoCreateInbox,omitempty"`
-	ImportOnConnect      *bool    `json:"importOnConnect,omitempty"`
-	ImportPeriod         string   `json:"importPeriod,omitempty"`
-	TimeoutTextSeconds   *int     `json:"timeoutTextSeconds,omitempty"`
-	TimeoutMediaSeconds  *int     `json:"timeoutMediaSeconds,omitempty"`
-	TimeoutLargeSeconds  *int     `json:"timeoutLargeSeconds,omitempty"`
-	RedisURL             string   `json:"redisUrl,omitempty"`
+	URL                 string   `json:"url" validate:"required,url"`
+	AccountID           int      `json:"accountId" validate:"required,gt=0"`
+	Token               string   `json:"token" validate:"required"`
+	WebhookToken        string   `json:"webhookToken,omitempty"`
+	InboxID             int      `json:"inboxId,omitempty"`
+	InboxName           string   `json:"inboxName,omitempty"`
+	SignMsg             *bool    `json:"signMsg,omitempty"`
+	SignDelimiter       string   `json:"signDelimiter,omitempty"`
+	ReopenConversation  *bool    `json:"reopenConversation,omitempty"`
+	MergeBRContacts     *bool    `json:"mergeBrContacts,omitempty"`
+	IgnoreGroups        *bool    `json:"ignoreGroups,omitempty"`
+	IgnoreJIDs          []string `json:"ignoreJids,omitempty"`
+	ConversationPending *bool    `json:"conversationPending,omitempty"`
+	AutoCreateInbox     *bool    `json:"autoCreateInbox,omitempty"`
+	ImportOnConnect     *bool    `json:"importOnConnect,omitempty"`
+	ImportPeriod        string   `json:"importPeriod,omitempty"`
+	TimeoutTextSeconds  *int     `json:"timeoutTextSeconds,omitempty"`
+	TimeoutMediaSeconds *int     `json:"timeoutMediaSeconds,omitempty"`
+	TimeoutLargeSeconds *int     `json:"timeoutLargeSeconds,omitempty"`
+	MessageRead         *bool    `json:"messageRead,omitempty"`
+	DatabaseURI         string   `json:"databaseUri,omitempty"`
+	RedisURL            string   `json:"redisUrl,omitempty"`
 }
 
 type ChatwootConfigResp struct {
-	SessionID            string   `json:"sessionId"`
-	URL                  string   `json:"url"`
-	AccountID            int      `json:"accountId"`
-	InboxID              int      `json:"inboxId"`
-	InboxName            string   `json:"inboxName"`
-	SignMsg              bool     `json:"signMsg"`
-	SignDelimiter        string   `json:"signDelimiter"`
-	ReopenConversation   bool     `json:"reopenConversation"`
-	MergeBRContacts      bool     `json:"mergeBrContacts"`
-	IgnoreGroups         bool     `json:"ignoreGroups"`
-	IgnoreJIDs           []string `json:"ignoreJids"`
-	ConversationPending  bool     `json:"conversationPending"`
-	Enabled              bool     `json:"enabled"`
-	WebhookURL           string   `json:"webhookUrl"`
-	ImportOnConnect      bool     `json:"importOnConnect"`
-	ImportPeriod         string   `json:"importPeriod"`
-	TimeoutTextSeconds   int      `json:"timeoutTextSeconds"`
-	TimeoutMediaSeconds  int      `json:"timeoutMediaSeconds"`
-	TimeoutLargeSeconds  int      `json:"timeoutLargeSeconds"`
-	RedisURL             string   `json:"redisUrl,omitempty"`
+	SessionID           string   `json:"sessionId"`
+	URL                 string   `json:"url"`
+	AccountID           int      `json:"accountId"`
+	InboxID             int      `json:"inboxId"`
+	InboxName           string   `json:"inboxName"`
+	SignMsg             bool     `json:"signMsg"`
+	SignDelimiter       string   `json:"signDelimiter"`
+	ReopenConversation  bool     `json:"reopenConversation"`
+	MergeBRContacts     bool     `json:"mergeBrContacts"`
+	IgnoreGroups        bool     `json:"ignoreGroups"`
+	IgnoreJIDs          []string `json:"ignoreJids"`
+	ConversationPending bool     `json:"conversationPending"`
+	Enabled             bool     `json:"enabled"`
+	WebhookURL          string   `json:"webhookUrl"`
+	ImportOnConnect     bool     `json:"importOnConnect"`
+	ImportPeriod        string   `json:"importPeriod"`
+	TimeoutTextSeconds  int      `json:"timeoutTextSeconds"`
+	TimeoutMediaSeconds int      `json:"timeoutMediaSeconds"`
+	TimeoutLargeSeconds int      `json:"timeoutLargeSeconds"`
+	MessageRead         bool     `json:"messageRead"`
+	DatabaseURI         string   `json:"databaseUri,omitempty"`
+	RedisURL            string   `json:"redisUrl,omitempty"`
 }
 
 type ImportHistoryReq struct {
@@ -125,6 +129,9 @@ type ChatwootWebhookPayload struct {
 		Messages  []struct {
 			ID      int    `json:"id"`
 			Content string `json:"content,omitempty"`
+			Sender  *struct {
+				AvailableName string `json:"available_name,omitempty"`
+			} `json:"sender,omitempty"`
 		} `json:"messages,omitempty"`
 		Meta struct {
 			Sender struct {
