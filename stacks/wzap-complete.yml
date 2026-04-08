@@ -243,14 +243,11 @@ services:
 
 volumes:
   wzap_postgres_data:
-    external: true
-    name: wzap_postgres_data
+    driver: local
   wzap_nats_data:
-    external: true
-    name: wzap_nats_data
+    driver: local
   wzap_minio_data:
-    external: true
-    name: wzap_minio_data
+    driver: local
 
 ## --------------------------- NETWORKS --------------------------- ##
 
