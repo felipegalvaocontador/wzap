@@ -767,7 +767,18 @@ func (s *Service) handleEditedMessage(ctx context.Context, cfg *ChatwootConfig, 
 	}
 
 	client := s.clientFn(cfg)
-	_ = client.UpdateMessage(ctx, *origMsg.CWConversationID, *origMsg.CWMessageID, newText)
+
+	messageType := "incoming"
+	if origMsg.FromMe {
+		messageType = "outgoing"
+	}
+
+	_, _ = client.CreateMessage(ctx, *origMsg.CWConversationID, MessageReq{
+		Content:           "✏️ *Mensagem editada:*\n" + newText,
+		MessageType:       messageType,
+		SourceReplyID:     *origMsg.CWMessageID,
+		ContentAttributes: map[string]any{"in_reply_to": *origMsg.CWMessageID},
+	})
 }
 
 func (s *Service) handleLiveLocation(ctx context.Context, cfg *ChatwootConfig, convID int, msgID string, fromMe bool, liveMsg map[string]interface{}) {

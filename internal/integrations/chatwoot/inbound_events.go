@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"wzap/internal/logger"
+	"wzap/internal/model"
 )
 
 func (s *Service) handleReceipt(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
@@ -87,18 +88,22 @@ func (s *Service) handleRevoke(ctx context.Context, cfg *ChatwootConfig, payload
 
 	logger.Debug().Str("session", cfg.SessionID).Str("revokedMsgID", revokedMsgID).Msg("[CW] handling message revoke")
 
-	msg, err := s.msgRepo.FindByID(ctx, cfg.SessionID, revokedMsgID)
+	msg, err := s.waitForCWRef(ctx, cfg.SessionID, revokedMsgID)
 	if err != nil {
+		logger.Warn().Err(err).Str("revokedMsgID", revokedMsgID).Msg("[CW] message not found for revoke")
 		return
 	}
 
 	if msg.CWMessageID == nil || msg.CWConversationID == nil {
+		logger.Warn().Str("revokedMsgID", revokedMsgID).Msg("[CW] revoke: CW refs not available after retry")
 		return
 	}
 
 	client := s.clientFn(cfg)
 	if err := client.DeleteMessage(ctx, *msg.CWConversationID, *msg.CWMessageID); err != nil {
 		logger.Warn().Err(err).Str("revokedMsgID", revokedMsgID).Msg("[CW] failed to delete Chatwoot message on revoke")
+	} else {
+		logger.Debug().Str("revokedMsgID", revokedMsgID).Int("cwMsgID", *msg.CWMessageID).Msg("[CW] successfully deleted Chatwoot message on revoke")
 	}
 }
 
@@ -133,19 +138,81 @@ func (s *Service) handleEdit(ctx context.Context, cfg *ChatwootConfig, payload [
 
 	logger.Debug().Str("session", cfg.SessionID).Str("editedMsgID", editedMsgID).Str("newText", newText).Msg("[CW] handling message edit")
 
-	msg, err := s.msgRepo.FindByID(ctx, cfg.SessionID, editedMsgID)
+	msg, err := s.waitForCWRef(ctx, cfg.SessionID, editedMsgID)
 	if err != nil {
+		logger.Warn().Err(err).Str("editedMsgID", editedMsgID).Msg("[CW] message not found for edit")
 		return
 	}
 
 	if msg.CWMessageID == nil || msg.CWConversationID == nil {
+		logger.Warn().Str("editedMsgID", editedMsgID).Msg("[CW] edit: CW refs not available after retry")
 		return
 	}
 
+	logger.Debug().Str("editedMsgID", editedMsgID).Int("cwMsgID", *msg.CWMessageID).Int("cwConvID", *msg.CWConversationID).Msg("[CW] creating edit notification in Chatwoot")
+
 	client := s.clientFn(cfg)
-	if err := client.UpdateMessage(ctx, *msg.CWConversationID, *msg.CWMessageID, newText); err != nil {
-		logger.Warn().Err(err).Str("editedMsgID", editedMsgID).Msg("[CW] failed to update Chatwoot message on edit")
+
+	messageType := "incoming"
+	if msg.FromMe {
+		messageType = "outgoing"
 	}
+
+	editedContent := "✏️ *Mensagem editada:*\n" + newText
+	_, err = client.CreateMessage(ctx, *msg.CWConversationID, MessageReq{
+		Content:           editedContent,
+		MessageType:       messageType,
+		SourceReplyID:     *msg.CWMessageID,
+		ContentAttributes: map[string]any{"in_reply_to": *msg.CWMessageID},
+	})
+	if err != nil {
+		logger.Warn().Err(err).Str("editedMsgID", editedMsgID).Msg("[CW] failed to create edit notification in Chatwoot")
+		return
+	}
+
+	logger.Debug().Str("editedMsgID", editedMsgID).Msg("[CW] successfully created edit notification in Chatwoot")
+}
+
+func (s *Service) waitForCWRef(ctx context.Context, sessionID, msgID string) (*model.Message, error) {
+	delays := []time.Duration{
+		200 * time.Millisecond,
+		300 * time.Millisecond,
+		500 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		3 * time.Second,
+	}
+
+	msg, err := s.msgRepo.FindByID(ctx, sessionID, msgID)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.CWMessageID != nil && msg.CWConversationID != nil {
+		return msg, nil
+	}
+
+	logger.Debug().Str("msgID", msgID).Msg("[CW] CW refs not yet available, starting retry loop")
+
+	for i, delay := range delays {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+
+		msg, err = s.msgRepo.FindByID(ctx, sessionID, msgID)
+		if err != nil {
+			return nil, err
+		}
+
+		if msg.CWMessageID != nil && msg.CWConversationID != nil {
+			logger.Debug().Str("msgID", msgID).Int("attempt", i+2).Msg("[CW] CW refs available after retry")
+			return msg, nil
+		}
+	}
+
+	return msg, nil
 }
 
 func (s *Service) handleConnected(ctx context.Context, cfg *ChatwootConfig, payload []byte) {
