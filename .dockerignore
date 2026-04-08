@@ -15,9 +15,7 @@ Makefile
 docker-compose*.yml
 docker
 docs
-web/node_modules
-web/.nuxt
-web/.output
+web
 temp
 bin
 chatwoot-docker

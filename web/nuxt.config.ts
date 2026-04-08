@@ -8,10 +8,6 @@ export default defineNuxtConfig({
 
   ssr: false,
 
-  app: {
-    baseURL: '/admin/'
-  },
-
   devtools: {
     enabled: true
   },

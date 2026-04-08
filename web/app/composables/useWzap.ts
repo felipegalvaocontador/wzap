@@ -16,7 +16,7 @@ export function useWzap() {
   }
 
   const api = async <T = any>(path: string, options: any = {}): Promise<T> => {
-    return await $fetch<T>(path, {
+    return await $fetch<T>(`/api${path}`, {
       ...options,
       headers: {
         'Authorization': token.value,
